@@ -602,7 +602,7 @@
     font-size: 16px;
   }
 
-  /* LEADERBOARD */
+  /* ROW LIST (Pipeline) */
   .leader-row {
     display: flex;
     align-items: center;
@@ -611,17 +611,6 @@
     gap: 12px;
   }
   .leader-row:last-child { border-bottom: none; }
-  .leader-rank {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--royal);
-    width: 24px;
-  }
-  .leader-name {
-    flex: 1;
-    font-weight: 600;
-    font-size: 14px;
-  }
   .leader-stats {
     text-align: right;
   }
@@ -1055,11 +1044,6 @@
         <div class="stat-value" id="statAvg">$0</div>
         <div class="stat-sub">Per job</div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="card-title">Team Leaderboard</div>
-      <div id="leaderboard"></div>
     </div>
 
     <div class="card">
@@ -2592,46 +2576,12 @@ function renderDashboard() {
   const mineTotal = mine.reduce((s, j) => s + (j.price || 0), 0);
   const mineCommission = mine.reduce((s, j) => s + (j.commission || 0), 0);
 
-  // For sales reps, "total" === "mine" since they only see their own
-  // Hide redundant "My Sales" tile for reps, show different label
-  const isRep = state.currentRole === 'rep';
-
   document.getElementById('statTotal').textContent = '$' + formatNum(total);
   document.getElementById('statCount').textContent = count + ' job' + (count !== 1 ? 's' : '');
   document.getElementById('statMine').textContent = '$' + formatNum(mineTotal);
   document.getElementById('statMineCount').textContent = mine.length + ' job' + (mine.length !== 1 ? 's' : '');
   document.getElementById('statCommission').textContent = '$' + formatNum(mineCommission);
   document.getElementById('statAvg').textContent = '$' + formatNum(avg);
-
-  // Leaderboard — only show if not a rep (reps shouldn't see other reps' numbers)
-  const lbCard = document.getElementById('leaderboard').closest('.card');
-  if (isRep) {
-    lbCard.style.display = 'none';
-  } else {
-    lbCard.style.display = '';
-    const byPerson = {};
-    filtered.forEach(j => {
-      if (!byPerson[j.salesperson]) byPerson[j.salesperson] = { total: 0, count: 0 };
-      byPerson[j.salesperson].total += j.price || 0;
-      byPerson[j.salesperson].count += 1;
-    });
-    const sorted = Object.entries(byPerson).sort((a, b) => b[1].total - a[1].total);
-    const lbEl = document.getElementById('leaderboard');
-    if (!sorted.length) {
-      lbEl.innerHTML = `<div style="font-size:13px; color:var(--gray-500); padding:8px 0;">No sales yet for this period.</div>`;
-    } else {
-      lbEl.innerHTML = sorted.map(([name, data], i) => `
-        <div class="leader-row">
-          <div class="leader-rank">${i + 1}</div>
-          <div class="leader-name">${escapeHtml(name)}${name === state.currentUser ? ' <span style="color:var(--royal); font-weight:500; font-size:11px;">(you)</span>' : ''}</div>
-          <div class="leader-stats">
-            <div class="leader-total">$${formatNum(data.total)}</div>
-            <div class="leader-count">${data.count} job${data.count !== 1 ? 's' : ''}</div>
-          </div>
-        </div>
-      `).join('');
-    }
-  }
 
   // Pipeline
   const statuses = ['Sold', 'Paid', 'Not Paid'];
