@@ -71,6 +71,7 @@
     background: white;
     border-radius: 6px;
     padding: 4px 8px;
+    flex-shrink: 0;
   }
   .header-title {
     font-size: 17px;
@@ -94,6 +95,14 @@
     align-items: center;
     gap: 6px;
     line-height: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  #userBadgeText {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
   .signout-btn {
     background: rgba(255,255,255,0.18);
@@ -108,6 +117,7 @@
     line-height: 1;
     transition: background 0.15s;
     white-space: nowrap;
+    flex-shrink: 0;
   }
   .signout-btn:hover { background: rgba(255,255,255,0.32); }
   .role-dot {
@@ -115,6 +125,7 @@
     height: 7px;
     border-radius: 50%;
     background: #4ADE80;
+    flex-shrink: 0;
   }
   .role-dot.view { background: #FBBF24; }
   .role-dot.rep { background: #4ADE80; }
