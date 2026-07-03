@@ -860,6 +860,57 @@
     letter-spacing: -0.3px;
   }
 
+  /* PAYMENT + FEES */
+  .pay-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 16px;
+    padding: 4px 0;
+  }
+  .pay-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-700);
+    cursor: pointer;
+  }
+  .pay-option input { width: 17px; height: 17px; accent-color: var(--royal); }
+  .manager-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    background: var(--royal-pale);
+    color: var(--royal-dark);
+    padding: 2px 7px;
+    border-radius: 999px;
+    vertical-align: middle;
+    margin-left: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .fee-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .fee-label { flex: 1; font-size: 13px; font-weight: 600; color: var(--gray-700); }
+  .fee-input-wrap { position: relative; display: flex; align-items: center; width: 130px; }
+  .fee-dollar { position: absolute; left: 11px; color: var(--gray-500); font-size: 13px; pointer-events: none; }
+  .fee-input-wrap input {
+    width: 100%;
+    padding: 9px 10px 9px 22px;
+    font-size: 14px;
+    border: 1px solid var(--gray-300);
+    border-radius: 8px;
+    font-family: inherit;
+  }
+  .fee-summary { font-size: 12px; color: var(--gray-600); margin-top: 4px; }
+  .badge-pay { background: #EEF2FF; color: #3730A3; }
+  .job-net { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
+
   /* EQUIPMENT MULTI-ITEM */
   .item-row {
     background: var(--gray-50);
@@ -1106,6 +1157,18 @@
         <div style="font-size:11px; color:var(--gray-500); margin-top:6px;">
           💡 Auto-set from tier when you enter sale price — adjust slider for actual commission on this job.
         </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Payment Method</label>
+        <div class="pay-group" id="f-payment-group"></div>
+      </div>
+
+      <div class="form-group" id="f-fees-section">
+        <label class="form-label">Fee Deductions <span class="manager-tag">Manager</span></label>
+        <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Deducted from the sale price before commission is calculated.</div>
+        <div id="f-fees-list"></div>
+        <div class="fee-summary" id="f-fee-summary" style="display:none;"></div>
       </div>
 
       <div class="form-group">
@@ -1372,6 +1435,8 @@ function rowToJob(r) {
     price: Number(r.price) || 0,
     commission: Number(r.commission) || 0,
     commissionRate: Number(r.commission_rate) || 0,
+    paymentMethods: r.payment_methods || [],
+    fees: r.fees || {},
     managerNotes: r.manager_notes || '',
     salesNotes: r.sales_notes || '',
     flip: !!r.flip,
@@ -1396,6 +1461,8 @@ function jobToRow(j) {
     price: j.price,
     commission: j.commission,
     commission_rate: j.commissionRate,
+    payment_methods: j.paymentMethods || [],
+    fees: j.fees || {},
     manager_notes: j.managerNotes,
     sales_notes: j.salesNotes,
     flip: !!j.flip,
@@ -1449,13 +1516,34 @@ async function saveData() {
 }
 
 // Per-job database operations
+// If the Supabase `jobs` table is missing the newer columns (payment_methods, fees),
+// Postgres returns a "column ... does not exist" (code 42703). Strip those keys and
+// retry so the app keeps working until the one-time migration is run.
+const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees'];
+function isMissingColumnError(error) {
+  return error && (error.code === '42703' || /column .* does not exist|Could not find/i.test(error.message || ''));
+}
+function stripOptionalColumns(row) {
+  const clean = { ...row };
+  OPTIONAL_JOB_COLUMNS.forEach(c => delete clean[c]);
+  return clean;
+}
+
 async function dbInsertJob(job) {
-  const { data, error } = await sbClient.from('jobs').insert(jobToRow(job)).select().single();
+  let { data, error } = await sbClient.from('jobs').insert(jobToRow(job)).select().single();
+  if (error && isMissingColumnError(error)) {
+    console.warn('jobs table missing payment/fees columns — run the migration. Saving without them for now.');
+    ({ data, error } = await sbClient.from('jobs').insert(stripOptionalColumns(jobToRow(job))).select().single());
+  }
   if (error) { showToast('Save failed — try again'); console.error(error); return null; }
   return rowToJob(data);
 }
 async function dbUpdateJob(id, jobLike) {
-  const { error } = await sbClient.from('jobs').update(jobToRow(jobLike)).eq('id', id);
+  let { error } = await sbClient.from('jobs').update(jobToRow(jobLike)).eq('id', id);
+  if (error && isMissingColumnError(error)) {
+    console.warn('jobs table missing payment/fees columns — run the migration. Saving without them for now.');
+    ({ error } = await sbClient.from('jobs').update(stripOptionalColumns(jobToRow(jobLike))).eq('id', id));
+  }
   if (error) { showToast('Update failed — try again'); console.error(error); return false; }
   return true;
 }
@@ -1734,6 +1822,11 @@ function showScreen(name, btn) {
       delete slider.dataset.userTouched;
     }
     document.getElementById('commissionRateDisplay').textContent = '8%';
+    // Payment methods (everyone) + fee deductions (manager only)
+    document.getElementById('f-payment-group').innerHTML = paymentCheckboxesHtml('f-pay', []);
+    document.getElementById('f-fees-list').innerHTML = feeInputsHtml('f-fee', {});
+    document.getElementById('f-fee-summary').style.display = 'none';
+    document.getElementById('f-fees-section').style.display = state.currentRole === 'gm' ? '' : 'none';
     // Reset items list (start with one empty row)
     if (document.querySelectorAll('#f-items-list .item-row').length === 0) {
       addItemRow();
@@ -1851,6 +1944,58 @@ function getCommissionRate(price) {
   return last ? last.rate : 0;
 }
 
+// ============== PAYMENT & FEES ==============
+const PAYMENT_METHODS = ['Check', 'Cash', 'Financing', 'Credit Card', 'Debit'];
+const FEE_TYPES = [
+  { key: 'financing',  label: 'Financing fee' },
+  { key: 'creditCard', label: 'Credit card fee' },
+  { key: 'electrical', label: 'Electrical fee' },
+  { key: 'other',      label: 'Other fee' },
+];
+
+function sumFees(fees) {
+  if (!fees) return 0;
+  return FEE_TYPES.reduce((s, t) => s + (Number(fees[t.key]) || 0), 0);
+}
+// Commission is calculated on the sale price minus manager-entered fees
+function netPrice(price, fees) {
+  return Math.max(0, (Number(price) || 0) - sumFees(fees));
+}
+
+// HTML builders — shared by the Add and Edit forms so both stay in sync
+function paymentCheckboxesHtml(cls, selected) {
+  selected = selected || [];
+  return PAYMENT_METHODS.map(m =>
+    `<label class="pay-option"><input type="checkbox" class="${cls}" value="${escapeHtml(m)}" ${selected.includes(m) ? 'checked' : ''}> ${escapeHtml(m)}</label>`
+  ).join('');
+}
+function feeInputsHtml(cls, fees) {
+  fees = fees || {};
+  return FEE_TYPES.map(t =>
+    `<div class="fee-row">
+      <label class="fee-label">${t.label}</label>
+      <div class="fee-input-wrap"><span class="fee-dollar">$</span>
+        <input type="number" inputmode="decimal" min="0" class="${cls}" data-fee="${t.key}" placeholder="0" value="${fees[t.key] ? fees[t.key] : ''}">
+      </div>
+    </div>`
+  ).join('');
+}
+
+// Collectors — read current values out of a form/modal
+function collectPayment(cls, root) {
+  root = root || document;
+  return Array.from(root.querySelectorAll('.' + cls)).filter(c => c.checked).map(c => c.value);
+}
+function collectFees(cls, root) {
+  root = root || document;
+  const f = {};
+  root.querySelectorAll('.' + cls).forEach(inp => {
+    const v = parseFloat(inp.value);
+    if (v > 0) f[inp.dataset.fee] = v;
+  });
+  return f;
+}
+
 // ============== ADD JOB ==============
 function renderSalespersonDropdown() {
   const sel = document.getElementById('f-salesperson');
@@ -1877,14 +2022,28 @@ function renderBrandDropdown() {
 
 // Live commission ticker — driven by both price and rate slider
 function updateCommissionTicker() {
-  const p = parseFloat(document.getElementById('f-price').value);
+  const p = parseFloat(document.getElementById('f-price').value) || 0;
   const rate = parseFloat(document.getElementById('f-commission-rate').value);
   const rateDisplay = document.getElementById('commissionRateDisplay');
   if (rateDisplay) rateDisplay.textContent = rate + '%';
 
+  // Fees reduce the base the commission is calculated on
+  const fees = collectFees('f-fee');
+  const totalFees = sumFees(fees);
+  const net = netPrice(p, fees);
+  const feeSummary = document.getElementById('f-fee-summary');
+  if (feeSummary) {
+    if (totalFees > 0) {
+      feeSummary.innerHTML = `Sale $${formatNum(p)} − fees $${formatNum(totalFees)} = <strong style="color:var(--royal);">net $${formatNum(net)}</strong>`;
+      feeSummary.style.display = 'block';
+    } else {
+      feeSummary.style.display = 'none';
+    }
+  }
+
   const ticker = document.getElementById('commissionTicker');
-  if (p > 0 && rate > 0) {
-    const c = (p * rate) / 100;
+  if (net > 0 && rate > 0) {
+    const c = (net * rate) / 100;
     document.getElementById('tickerRate').textContent = rate + '%';
     const amountEl = document.getElementById('tickerAmount');
     amountEl.textContent = '$' + formatNum(c);
@@ -1910,6 +2069,9 @@ document.addEventListener('input', (e) => {
   }
   if (e.target.id === 'f-commission-rate') {
     e.target.dataset.userTouched = '1';
+    updateCommissionTicker();
+  }
+  if (e.target.classList && e.target.classList.contains('f-fee')) {
     updateCommissionTicker();
   }
 });
@@ -1977,7 +2139,10 @@ async function saveJob() {
   if (!salesperson) { alert('Please pick a salesperson'); return; }
   if (!items.length) { alert('Add at least one equipment item'); return; }
 
-  const commission = (price * commissionRate) / 100;
+  const paymentMethods = collectPayment('f-pay');
+  // Fees are manager-only in the UI; commission is on the net (price − fees)
+  const fees = collectFees('f-fee');
+  const commission = (netPrice(price, fees) * commissionRate) / 100;
 
   // For backward compat & display: also store first item as "equipment" + "brand" top-level
   const firstItem = items[0];
@@ -1992,6 +2157,8 @@ async function saveJob() {
     price,
     commission,
     commissionRate, // store the % rate too
+    paymentMethods,
+    fees,
     managerNotes,
     salesNotes,
     flip,
@@ -2010,6 +2177,10 @@ async function saveJob() {
   document.getElementById('f-price').value = '';
   document.getElementById('f-manager-notes').value = '';
   document.getElementById('f-sales-notes').value = '';
+  // Reset payment + fee inputs
+  document.getElementById('f-payment-group').innerHTML = paymentCheckboxesHtml('f-pay', []);
+  document.getElementById('f-fees-list').innerHTML = feeInputsHtml('f-fee', {});
+  document.getElementById('f-fee-summary').style.display = 'none';
   const flipNo = document.querySelector('input[name="f-flip"][value="No"]');
   if (flipNo) flipNo.checked = true;
   document.getElementById('f-flip-detail').value = '';
@@ -2095,6 +2266,13 @@ function renderJobs() {
     const commLine = comm > 0 || rate > 0
       ? `<div class="job-commission">${rate ? rate + '% · ' : ''}$${formatNum(comm)} commission</div>`
       : '';
+    const feesTotal = sumFees(j.fees);
+    const netLine = feesTotal > 0
+      ? `<div class="job-net">−$${formatNum(feesTotal)} fees · net $${formatNum(netPrice(j.price, j.fees))}</div>`
+      : '';
+    const payBadges = (j.paymentMethods || []).map(p =>
+      `<span class="badge badge-pay">${escapeHtml(p)}</span>`
+    ).join('');
     return `
     <div class="job-item" onclick="openJobDetail('${j.id}')">
       <div class="job-head">
@@ -2103,6 +2281,7 @@ function renderJobs() {
         </div>
         <div style="text-align:right;">
           <div class="job-price">$${formatNum(j.price)}</div>
+          ${netLine}
           ${commLine}
         </div>
       </div>
@@ -2110,6 +2289,7 @@ function renderJobs() {
         ${equipBadges}
         <span class="badge badge-status-${statusClass(j.status)}">${j.status}</span>
         <span class="badge badge-person">${escapeHtml(j.salesperson)}</span>
+        ${payBadges}
         <span class="badge-date">${formatDate(j.date)}</span>
       </div>
     </div>
@@ -2176,15 +2356,26 @@ function renderJobReadOnly(j) {
       <div class="stat" style="padding:10px;">
         <div class="stat-label">Commission</div>
         <div class="stat-value stat-green" style="font-size:18px;">$${formatNum(j.commission)}</div>
-        <div class="stat-sub">${rateDisplay} rate</div>
+        <div class="stat-sub">${rateDisplay} rate${sumFees(j.fees) > 0 ? ' · on net' : ''}</div>
       </div>
     </div>
 
     <table style="width:100%; font-size:14px; margin-bottom:14px;">
       <tr><td style="padding:6px 0; color:var(--gray-500);">Salesperson</td><td style="padding:6px 0; text-align:right; font-weight:600;">${escapeHtml(j.salesperson)}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Status</td><td style="padding:6px 0; text-align:right;"><span class="badge badge-status-${statusClass(j.status)}">${j.status}</span></td></tr>
+      <tr><td style="padding:6px 0; color:var(--gray-500);">Payment</td><td style="padding:6px 0; text-align:right; font-weight:600;">${(j.paymentMethods && j.paymentMethods.length) ? escapeHtml(j.paymentMethods.join(', ')) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Date Sold</td><td style="padding:6px 0; text-align:right; font-weight:600;">${formatDate(j.date)}</td></tr>
     </table>
+
+    ${sumFees(j.fees) > 0 ? `
+    <div class="form-label">Fee Deductions</div>
+    <table style="width:100%; font-size:14px; margin-bottom:14px; background:var(--gray-50); border-radius:8px;">
+      ${FEE_TYPES.filter(t => Number(j.fees[t.key]) > 0).map(t =>
+        `<tr><td style="padding:6px 12px; color:var(--gray-500);">${t.label}</td><td style="padding:6px 12px; text-align:right; font-weight:600;">−$${formatNum(j.fees[t.key])}</td></tr>`
+      ).join('')}
+      <tr><td style="padding:6px 12px; color:var(--gray-700); font-weight:700; border-top:1px solid var(--gray-200);">Total fees</td><td style="padding:6px 12px; text-align:right; font-weight:700; border-top:1px solid var(--gray-200);">−$${formatNum(sumFees(j.fees))}</td></tr>
+      <tr><td style="padding:6px 12px; color:var(--royal); font-weight:700;">Net (commission basis)</td><td style="padding:6px 12px; text-align:right; font-weight:700; color:var(--royal);">$${formatNum(netPrice(j.price, j.fees))}</td></tr>
+    </table>` : ''}
 
     <div class="form-label" style="margin-top:14px;">Equipment Sold</div>
     <div style="background:var(--gray-50); border-radius:8px; padding:4px 12px; margin-bottom:14px;">
@@ -2264,10 +2455,22 @@ function renderJobEditForm(j) {
         <div class="commission-rate-display" id="editRateDisplay">${currentRate}%</div>
       </div>
       <div style="font-size:12px; color:var(--gray-500); margin-top:6px; display:flex; justify-content:space-between;">
-        <span>Commission: <strong id="editCommissionAmount" style="color:var(--royal); font-size:14px;">$${formatNum((j.price * currentRate) / 100)}</strong></span>
+        <span>Commission: <strong id="editCommissionAmount" style="color:var(--royal); font-size:14px;">$${formatNum((netPrice(j.price, j.fees) * currentRate) / 100)}</strong></span>
         <span>Adjust as needed for this specific job</span>
       </div>
     </div>
+
+    <div class="form-group">
+      <label class="form-label">Payment Method</label>
+      <div class="pay-group">${paymentCheckboxesHtml('edit-payment', j.paymentMethods || [])}</div>
+    </div>
+
+    ${state.currentRole === 'gm' ? `
+    <div class="form-group">
+      <label class="form-label">Fee Deductions <span class="manager-tag">Manager</span></label>
+      <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">Deducted from the sale price before commission is calculated.</div>
+      <div id="edit-fees-list">${feeInputsHtml('edit-fee', j.fees || {})}</div>
+    </div>` : ''}
 
     <div class="form-group">
       <label class="form-label">Equipment Sold</label>
@@ -2336,12 +2539,14 @@ function attachEditFormHandlers(jobId) {
   function refresh() {
     const p = parseFloat(priceInput.value) || 0;
     const r = parseFloat(rateSlider.value) || 0;
+    const net = netPrice(p, collectFees('edit-fee', modal));
     rateDisplay.textContent = r + '%';
-    commissionAmount.textContent = '$' + formatNum((p * r) / 100);
+    commissionAmount.textContent = '$' + formatNum((net * r) / 100);
   }
 
   if (priceInput) priceInput.addEventListener('input', refresh);
   if (rateSlider) rateSlider.addEventListener('input', refresh);
+  modal.querySelectorAll('.edit-fee').forEach(inp => inp.addEventListener('input', refresh));
 }
 
 function addEditItemRow() {
@@ -2384,10 +2589,17 @@ async function saveJobEdits(id) {
     updates[key] = val;
   });
 
-  // Get rate from slider
+  // Payment methods (any editor) + fees (manager-only UI)
+  updates.paymentMethods = collectPayment('edit-payment', modal);
+  // If the fee UI isn't present (e.g. a rep editing their own job), keep existing fees
+  const feeUiPresent = modal.querySelector('.edit-fee');
+  const fees = feeUiPresent ? collectFees('edit-fee', modal) : (j.fees || {});
+  updates.fees = fees;
+
+  // Get rate from slider — commission is on the net (price − fees)
   const rate = parseFloat(modal.querySelector('#edit-rate').value);
   updates.commissionRate = rate;
-  updates.commission = (updates.price * rate) / 100;
+  updates.commission = (netPrice(updates.price, fees) * rate) / 100;
 
   // Flip
   const editFlipYes = modal.querySelector('input[name="edit-flip"]:checked')?.value === 'Yes';
