@@ -289,7 +289,7 @@
     margin-bottom: 16px;
   }
   @media(min-width: 600px) {
-    .stat-grid { grid-template-columns: repeat(4, 1fr); }
+    .stat-grid { grid-template-columns: repeat(3, 1fr); }
   }
   .stat {
     background: white;
@@ -1083,12 +1083,7 @@
         <div class="stat-sub" id="statCount">0 jobs</div>
       </div>
       <div class="stat">
-        <div class="stat-label">My Sales</div>
-        <div class="stat-value" id="statMine">$0</div>
-        <div class="stat-sub" id="statMineCount">0 jobs</div>
-      </div>
-      <div class="stat">
-        <div class="stat-label">My Commission</div>
+        <div class="stat-label" id="commissionLabel">My Commission</div>
         <div class="stat-value stat-green" id="statCommission">$0</div>
         <div class="stat-sub">Earned</div>
       </div>
@@ -2786,15 +2781,15 @@ function renderDashboard() {
   const count = filtered.length;
   const avg = count > 0 ? total / count : 0;
 
-  const mine = filtered.filter(j => j.salesperson === state.currentUser);
-  const mineTotal = mine.reduce((s, j) => s + (j.price || 0), 0);
-  const mineCommission = mine.reduce((s, j) => s + (j.commission || 0), 0);
+  // Commission across the jobs you can see. Reps are already filtered to their own
+  // jobs (so this is "My Commission"); managers/viewers see the whole team's payout.
+  const commission = filtered.reduce((s, j) => s + (j.commission || 0), 0);
+  const isRep = state.currentRole === 'rep';
 
   document.getElementById('statTotal').textContent = '$' + formatNum(total);
   document.getElementById('statCount').textContent = count + ' job' + (count !== 1 ? 's' : '');
-  document.getElementById('statMine').textContent = '$' + formatNum(mineTotal);
-  document.getElementById('statMineCount').textContent = mine.length + ' job' + (mine.length !== 1 ? 's' : '');
-  document.getElementById('statCommission').textContent = '$' + formatNum(mineCommission);
+  document.getElementById('commissionLabel').textContent = isRep ? 'My Commission' : 'Team Commission';
+  document.getElementById('statCommission').textContent = '$' + formatNum(commission);
   document.getElementById('statAvg').textContent = '$' + formatNum(avg);
 
   // Pipeline
