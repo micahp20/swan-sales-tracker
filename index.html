@@ -2075,7 +2075,11 @@ function collectFees(cls, root) {
 // ============== ADD JOB ==============
 function renderSalespersonDropdown() {
   const sel = document.getElementById('f-salesperson');
-  sel.innerHTML = state.salespeople.map(n =>
+  // Managers/admins sell too — always let the logged-in person pick themselves,
+  // even if they haven't been added to the shared salespeople list.
+  const names = [...state.salespeople];
+  if (state.currentUser && !names.includes(state.currentUser)) names.unshift(state.currentUser);
+  sel.innerHTML = names.map(n =>
     `<option value="${escapeHtml(n)}" ${n === state.currentUser ? 'selected' : ''}>${escapeHtml(n)}</option>`
   ).join('');
 }
@@ -2512,7 +2516,8 @@ function renderJobEditForm(j) {
       <div class="form-group">
         <label class="form-label">Salesperson</label>
         <select class="form-select edit-field" data-field="salesperson">
-          ${state.salespeople.map(s => `<option ${s === j.salesperson ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+          ${(state.salespeople.includes(j.salesperson) || !j.salesperson ? state.salespeople : [j.salesperson, ...state.salespeople])
+            .map(s => `<option ${s === j.salesperson ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
         </select>
       </div>
     </div>
