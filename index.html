@@ -909,6 +909,7 @@
   }
   .fee-summary { font-size: 12px; color: var(--gray-600); margin-top: 4px; }
   .badge-pay { background: #EEF2FF; color: #3730A3; }
+  .badge-dept { background: #E0F2FE; color: #075985; }
   .job-net { font-size: 11px; color: var(--gray-500); margin-top: 2px; }
 
   /* EQUIPMENT MULTI-ITEM */
@@ -1022,6 +1023,14 @@
       <label class="form-label">Your Name</label>
       <input class="form-input" type="text" id="signup-name" autocomplete="name" placeholder="First and last name">
     </div>
+    <div class="form-group" id="signup-dept-group" style="display:none;">
+      <label class="form-label">Department</label>
+      <select class="form-select" id="signup-department"></select>
+    </div>
+    <div class="form-group" id="signup-title-group" style="display:none;">
+      <label class="form-label">Role / Title</label>
+      <select class="form-select" id="signup-title"></select>
+    </div>
     <div class="form-group">
       <label class="form-label">Email</label>
       <input class="form-input" type="email" id="login-email" autocomplete="username" placeholder="you@company.com" onkeydown="if(event.key==='Enter') doAuthAction()">
@@ -1119,6 +1128,11 @@
           <label class="form-label">Salesperson</label>
           <select class="form-select" id="f-salesperson"></select>
         </div>
+      </div>
+
+      <div class="form-group" id="f-department-group">
+        <label class="form-label">Department</label>
+        <select class="form-select" id="f-department"></select>
       </div>
 
       <div class="form-row">
@@ -1398,7 +1412,9 @@ let state = {
     { from: 20000, to: 999999, rate: 10 }
   ],
   currentUser: null,
-  currentRole: null, // 'rep', 'gm', or 'view'
+  currentRole: null, // permission tier: 'rep', 'gm', or 'view' (derived from title)
+  currentTitle: null, // 'Comfort Advisor' | 'Technician' | 'Admin' | 'Manager'
+  currentDept: null,  // 'HVAC' | 'Electrical' | 'Plumbing' | 'Office Staff'
   pendingRole: null, // staging during user picker
   dashFilter: 'month',
   dashMonth: '',
@@ -1410,6 +1426,21 @@ let state = {
 
 const LOCAL_USER_KEY = 'swan_current_user';
 const LOCAL_ROLE_KEY = 'swan_current_role';
+
+// Org structure — chosen at signup, stored on the profile
+const DEPARTMENTS = ['HVAC', 'Electrical', 'Plumbing', 'Office Staff'];
+const TITLES = ['Comfort Advisor', 'Technician', 'Admin', 'Manager'];
+
+// Which jobs the current user is allowed to see (UI-level scoping)
+function scopeJobsToUser(jobs) {
+  const t = state.currentTitle;
+  if (t === 'Admin' || state.currentRole === 'view') return jobs;         // company-wide
+  if (t === 'Manager') {
+    const dept = state.currentDept || '';
+    return jobs.filter(j => (j.department || '') === dept);               // own department
+  }
+  return jobs.filter(j => j.salesperson === state.currentUser);           // own sales only
+}
 const SHARED_KEY = 'swan_app_data';
 const SYNC_INTERVAL_MS = 8000; // Auto-refresh every 8 seconds
 
@@ -1432,6 +1463,7 @@ function rowToJob(r) {
     commissionRate: Number(r.commission_rate) || 0,
     paymentMethods: r.payment_methods || [],
     fees: r.fees || {},
+    department: r.department || '',
     managerNotes: r.manager_notes || '',
     salesNotes: r.sales_notes || '',
     flip: !!r.flip,
@@ -1458,6 +1490,7 @@ function jobToRow(j) {
     commission_rate: j.commissionRate,
     payment_methods: j.paymentMethods || [],
     fees: j.fees || {},
+    department: j.department || null,
     manager_notes: j.managerNotes,
     sales_notes: j.salesNotes,
     flip: !!j.flip,
@@ -1514,7 +1547,7 @@ async function saveData() {
 // If the Supabase `jobs` table is missing the newer columns (payment_methods, fees),
 // Postgres returns a "column ... does not exist" (code 42703). Strip those keys and
 // retry so the app keeps working until the one-time migration is run.
-const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees'];
+const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department'];
 function isMissingColumnError(error) {
   return error && (error.code === '42703' || /column .* does not exist|Could not find/i.test(error.message || ''));
 }
@@ -1558,14 +1591,32 @@ async function loadProfile() {
   const { data: { user } } = await sbClient.auth.getUser();
   if (!user) return false;
   state.authUserId = user.id;
-  const { data, error } = await sbClient.from('profiles').select('name, role').eq('id', user.id).single();
-  if (error || !data) {
-    state.currentUser = user.email;
-    state.currentRole = 'rep';
-  } else {
-    state.currentUser = data.name || user.email;
-    // 'manager' maps to the app's GM permissions; everyone else is a sales rep
-    state.currentRole = data.role === 'manager' ? 'gm' : 'rep';
+  const meta = user.user_metadata || {};
+
+  // Newer profiles carry department + title; select them but tolerate old schemas.
+  let data = null;
+  let res = await sbClient.from('profiles').select('name, role, department, title').eq('id', user.id).single();
+  if (res.error && isMissingColumnError(res.error)) {
+    // profiles table predates the department/title columns — read the basics only
+    res = await sbClient.from('profiles').select('name, role').eq('id', user.id).single();
+  }
+  if (!res.error) data = res.data;
+
+  const name = (data && data.name) || meta.name || user.email;
+  const department = (data && data.department) || meta.department || '';
+  // Fall back to signup metadata, then legacy role ('manager' owner => Admin/company-wide)
+  const title = (data && data.title) || meta.title ||
+    ((data && data.role === 'manager') ? 'Admin' : 'Comfort Advisor');
+
+  state.currentUser = name;
+  state.currentDept = department;
+  state.currentTitle = title;
+  // Permission tier: Admin & Manager get edit powers ('gm'); advisors/techs are 'rep'
+  state.currentRole = (title === 'Admin' || title === 'Manager') ? 'gm' : 'rep';
+
+  // Self-heal: persist department/title onto the profile if they weren't stored yet
+  if (!data || !data.department || !data.title) {
+    try { await sbClient.from('profiles').upsert({ id: user.id, name, department, title }); } catch (e) { /* RLS/columns may block; session values still apply */ }
   }
   return true;
 }
@@ -1577,6 +1628,8 @@ function toggleAuthMode(e) {
   if (e) e.preventDefault();
   authMode = (authMode === 'login') ? 'signup' : 'login';
   const nameGroup = document.getElementById('signup-name-group');
+  const deptGroup = document.getElementById('signup-dept-group');
+  const titleGroup = document.getElementById('signup-title-group');
   const subtitle = document.getElementById('auth-subtitle');
   const btn = document.getElementById('login-btn');
   const toggleText = document.getElementById('auth-toggle-text');
@@ -1587,12 +1640,27 @@ function toggleAuthMode(e) {
   okEl.style.display = 'none';
   if (authMode === 'signup') {
     nameGroup.style.display = 'block';
+    deptGroup.style.display = 'block';
+    titleGroup.style.display = 'block';
+    // Populate the dropdowns (with a "pick one" placeholder)
+    const deptSel = document.getElementById('signup-department');
+    const titleSel = document.getElementById('signup-title');
+    if (deptSel && !deptSel.options.length) {
+      deptSel.innerHTML = '<option value="">Select department…</option>' +
+        DEPARTMENTS.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+    }
+    if (titleSel && !titleSel.options.length) {
+      titleSel.innerHTML = '<option value="">Select role…</option>' +
+        TITLES.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    }
     subtitle.textContent = 'Create your account';
     btn.textContent = 'Create Account';
     toggleText.textContent = 'Already have an account?';
     toggleLink.textContent = 'Sign in';
   } else {
     nameGroup.style.display = 'none';
+    deptGroup.style.display = 'none';
+    titleGroup.style.display = 'none';
     subtitle.textContent = 'Sign in to continue';
     btn.textContent = 'Sign In';
     toggleText.textContent = 'New here?';
@@ -1608,6 +1676,8 @@ function doAuthAction() {
 
 async function doSignup() {
   const name = document.getElementById('signup-name').value.trim();
+  const department = document.getElementById('signup-department').value;
+  const title = document.getElementById('signup-title').value;
   const email = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
   const errEl = document.getElementById('login-error');
@@ -1625,6 +1695,11 @@ async function doSignup() {
     errEl.style.display = 'block';
     return;
   }
+  if (!department || !title) {
+    errEl.textContent = 'Pick your department and role.';
+    errEl.style.display = 'block';
+    return;
+  }
   if (!email || !password) {
     errEl.textContent = 'Enter your email and password.';
     errEl.style.display = 'block';
@@ -1639,7 +1714,7 @@ async function doSignup() {
   const { data, error } = await sbClient.auth.signUp({
     email,
     password,
-    options: { data: { name: name } }
+    options: { data: { name: name, department: department, title: title } }
   });
   btn.disabled = false; btn.textContent = 'Create Account';
   if (error) {
@@ -1741,15 +1816,23 @@ function applyRolePermissions() {
   const isView = state.currentRole === 'view';
   const isRep = state.currentRole === 'rep';
   const isGM = state.currentRole === 'gm';
+  const isAdmin = state.currentTitle === 'Admin';
+  const isManager = state.currentTitle === 'Manager';
 
-  // View-only banner
+  // Role banner — tells people the scope of what they're seeing
   const banner = document.getElementById('viewOnlyBanner');
   if (isView) {
     banner.style.display = 'block';
     banner.innerHTML = '👁️ View-only mode — you can see all sales but can\'t make changes';
+  } else if (isManager) {
+    banner.style.display = 'block';
+    banner.innerHTML = `🧭 ${escapeHtml(state.currentDept || 'Department')} Manager — you see your department's sales`;
+    banner.style.background = '#DBEAFE';
+    banner.style.color = '#1E3A8A';
+    banner.style.borderBottomColor = '#93C5FD';
   } else if (isRep) {
     banner.style.display = 'block';
-    banner.innerHTML = '🔒 Sales Rep mode — you only see your own sales';
+    banner.innerHTML = '🔒 You only see your own sales';
     banner.style.background = '#DCFCE7';
     banner.style.color = '#166534';
     banner.style.borderBottomColor = '#86EFAC';
@@ -1758,8 +1841,8 @@ function applyRolePermissions() {
   }
 
   document.getElementById('tab-add').classList.toggle('hidden', isView);
-  // Only GM gets settings access
-  document.getElementById('tab-settings').classList.toggle('hidden', !isGM);
+  // Only Admins get the global Settings screen (salespeople, commission tiers, etc.)
+  document.getElementById('tab-settings').classList.toggle('hidden', !isAdmin);
 
   // Update role dot color
   const dot = document.getElementById('roleDot');
@@ -1768,17 +1851,12 @@ function applyRolePermissions() {
   if (isRep) dot.classList.add('rep');
   if (isGM) dot.classList.add('gm');
 
-  // If on a hidden tab, send to dashboard
-  if (isView) {
-    const activeTab = document.querySelector('.tab.active');
-    if (activeTab && (activeTab.id === 'tab-add' || activeTab.id === 'tab-settings')) {
-      showScreen('dashboard', document.getElementById('tab-dashboard'));
-    }
-  } else if (isRep) {
-    const activeTab = document.querySelector('.tab.active');
-    if (activeTab && activeTab.id === 'tab-settings') {
-      showScreen('dashboard', document.getElementById('tab-dashboard'));
-    }
+  // If sitting on a tab this user can't access, send them to the dashboard
+  const activeTab = document.querySelector('.tab.active');
+  if (activeTab) {
+    const onHidden = (activeTab.id === 'tab-settings' && !isAdmin) ||
+                     (activeTab.id === 'tab-add' && isView);
+    if (onHidden) showScreen('dashboard', document.getElementById('tab-dashboard'));
   }
 }
 
@@ -1810,6 +1888,9 @@ function showScreen(name, btn) {
     document.getElementById('f-date').value = today;
     // Pre-fill dropdowns
     renderSalespersonDropdown();
+    renderDepartmentDropdown('f-department', state.currentDept);
+    // Department is auto-set to your own; only Admins may log for another department
+    document.getElementById('f-department').disabled = (state.currentTitle !== 'Admin');
     // Reset commission slider
     const slider = document.getElementById('f-commission-rate');
     if (slider) {
@@ -1999,6 +2080,15 @@ function renderSalespersonDropdown() {
   ).join('');
 }
 
+// Department <select> filler — used by the add form and the edit form
+function renderDepartmentDropdown(elId, selected) {
+  const sel = document.getElementById(elId);
+  if (!sel) return;
+  sel.innerHTML = DEPARTMENTS.map(d =>
+    `<option value="${escapeHtml(d)}" ${d === selected ? 'selected' : ''}>${escapeHtml(d)}</option>`
+  ).join('');
+}
+
 function renderEquipmentDropdown() {
   const sel = document.getElementById('f-equipment');
   if (!sel) return;
@@ -2138,6 +2228,8 @@ async function saveJob() {
   // Fees are manager-only in the UI; commission is on the net (price − fees)
   const fees = collectFees('f-fee');
   const commission = (netPrice(price, fees) * commissionRate) / 100;
+  // Department the sale belongs to (drives manager visibility)
+  const department = (document.getElementById('f-department') || {}).value || state.currentDept || '';
 
   // For backward compat & display: also store first item as "equipment" + "brand" top-level
   const firstItem = items[0];
@@ -2154,6 +2246,7 @@ async function saveJob() {
     commissionRate, // store the % rate too
     paymentMethods,
     fees,
+    department,
     managerNotes,
     salesNotes,
     flip,
@@ -2213,12 +2306,8 @@ function setJobSearch(value) {
 
 function renderJobs() {
   const list = document.getElementById('jobList');
-  let jobs = [...state.jobs];
-
-  // PRIVACY: Sales reps only see their own jobs
-  if (state.currentRole === 'rep' && state.currentUser) {
-    jobs = jobs.filter(j => j.salesperson === state.currentUser);
-  }
+  // PRIVACY: advisors/techs see only their own; managers see their department; admins see all
+  let jobs = scopeJobsToUser([...state.jobs]);
 
   if (state.jobFilter === 'mine' && state.currentUser) {
     jobs = jobs.filter(j => j.salesperson === state.currentUser);
@@ -2284,6 +2373,7 @@ function renderJobs() {
         ${equipBadges}
         <span class="badge badge-status-${statusClass(j.status)}">${j.status}</span>
         <span class="badge badge-person">${escapeHtml(j.salesperson)}</span>
+        ${j.department ? `<span class="badge badge-dept">${escapeHtml(j.department)}</span>` : ''}
         ${payBadges}
         <span class="badge-date">${formatDate(j.date)}</span>
       </div>
@@ -2357,6 +2447,7 @@ function renderJobReadOnly(j) {
 
     <table style="width:100%; font-size:14px; margin-bottom:14px;">
       <tr><td style="padding:6px 0; color:var(--gray-500);">Salesperson</td><td style="padding:6px 0; text-align:right; font-weight:600;">${escapeHtml(j.salesperson)}</td></tr>
+      <tr><td style="padding:6px 0; color:var(--gray-500);">Department</td><td style="padding:6px 0; text-align:right; font-weight:600;">${j.department ? escapeHtml(j.department) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Status</td><td style="padding:6px 0; text-align:right;"><span class="badge badge-status-${statusClass(j.status)}">${j.status}</span></td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Payment</td><td style="padding:6px 0; text-align:right; font-weight:600;">${(j.paymentMethods && j.paymentMethods.length) ? escapeHtml(j.paymentMethods.join(', ')) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Date Sold</td><td style="padding:6px 0; text-align:right; font-weight:600;">${formatDate(j.date)}</td></tr>
@@ -2453,6 +2544,13 @@ function renderJobEditForm(j) {
         <span>Commission: <strong id="editCommissionAmount" style="color:var(--royal); font-size:14px;">$${formatNum((netPrice(j.price, j.fees) * currentRate) / 100)}</strong></span>
         <span>Adjust as needed for this specific job</span>
       </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Department</label>
+      <select class="form-select" id="edit-department" ${state.currentTitle === 'Admin' ? '' : 'disabled'}>
+        ${DEPARTMENTS.map(d => `<option value="${escapeHtml(d)}" ${d === (j.department || state.currentDept) ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('')}
+      </select>
     </div>
 
     <div class="form-group">
@@ -2583,6 +2681,10 @@ async function saveJobEdits(id) {
     if (typeof val === 'string') val = val.trim();
     updates[key] = val;
   });
+
+  // Department (editable by Admins; locked to its current value for everyone else)
+  const deptSel = modal.querySelector('#edit-department');
+  if (deptSel) updates.department = deptSel.value || j.department || '';
 
   // Payment methods (any editor) + fees (manager-only UI)
   updates.paymentMethods = collectPayment('edit-payment', modal);
@@ -2770,12 +2872,8 @@ function populateMonthPicker() {
 
 function renderDashboard() {
   populateMonthPicker();
-  let filtered = filterByPeriod(state.jobs);
-
-  // PRIVACY: Sales reps only see their own jobs in dashboard
-  if (state.currentRole === 'rep' && state.currentUser) {
-    filtered = filtered.filter(j => j.salesperson === state.currentUser);
-  }
+  // PRIVACY: advisors/techs see only their own; managers see their department; admins see all
+  let filtered = scopeJobsToUser(filterByPeriod(state.jobs));
 
   const total = filtered.reduce((s, j) => s + (j.price || 0), 0);
   const count = filtered.length;
