@@ -600,6 +600,22 @@
     outline: none;
     border-color: var(--royal);
   }
+  .pp-nav {
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    border: 1.5px solid var(--gray-200);
+    background: white;
+    color: var(--royal);
+    font-size: 20px;
+    font-weight: 800;
+    line-height: 1;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .pp-nav:hover { background: var(--royal-pale); border-color: var(--royal); }
+  .badge-moved { background: #FEF3C7; color: #92400E; }
   .job-search {
     font-size: 16px;
   }
@@ -1072,17 +1088,10 @@
 
   <!-- DASHBOARD -->
   <div class="screen active" id="screen-dashboard">
-    <div class="filter-row">
-      <button class="filter-pill active" onclick="setDashFilter('month', this)">This Month</button>
-      <button class="filter-pill" onclick="setDashFilter('lastmonth', this)">Last Month</button>
-      <button class="filter-pill" onclick="setDashFilter('quarter', this)">Quarter</button>
-      <button class="filter-pill" onclick="setDashFilter('year', this)">Year</button>
-      <button class="filter-pill" onclick="setDashFilter('all', this)">All Time</button>
-    </div>
-    <div class="filter-row" style="margin-top:-4px;">
-      <select id="monthPicker" class="month-picker" onchange="setDashMonth(this.value)">
-        <option value="">Jump to a specific month…</option>
-      </select>
+    <div class="filter-row" style="align-items:center; gap:8px;">
+      <button class="pp-nav" onclick="shiftDashPeriod(-1)" title="Previous pay period" aria-label="Previous pay period">‹</button>
+      <select id="periodPicker" class="month-picker" onchange="setDashPeriod(this.value)" style="flex:1; min-width:0;"></select>
+      <button class="pp-nav" onclick="shiftDashPeriod(1)" title="Next pay period" aria-label="Next pay period">›</button>
     </div>
 
     <div class="stat-grid">
@@ -1416,8 +1425,7 @@ let state = {
   currentTitle: null, // 'Comfort Advisor' | 'Technician' | 'Admin' | 'Manager'
   currentDept: null,  // 'HVAC' | 'Electrical' | 'Plumbing' | 'Office Staff'
   pendingRole: null, // staging during user picker
-  dashFilter: 'month',
-  dashMonth: '',
+  dashPeriod: null, // selected pay-period start 'YYYY-MM-DD', or 'all' (null = current)
   jobFilter: 'all',
   jobSearch: '',
   authUserId: null,
@@ -1464,6 +1472,7 @@ function rowToJob(r) {
     paymentMethods: r.payment_methods || [],
     fees: r.fees || {},
     department: r.department || '',
+    payPeriodStart: r.pay_period_start ? String(r.pay_period_start).slice(0, 10) : '',
     managerNotes: r.manager_notes || '',
     salesNotes: r.sales_notes || '',
     flip: !!r.flip,
@@ -1491,6 +1500,7 @@ function jobToRow(j) {
     payment_methods: j.paymentMethods || [],
     fees: j.fees || {},
     department: j.department || null,
+    pay_period_start: j.payPeriodStart || null,
     manager_notes: j.managerNotes,
     sales_notes: j.salesNotes,
     flip: !!j.flip,
@@ -1547,7 +1557,7 @@ async function saveData() {
 // If the Supabase `jobs` table is missing the newer columns (payment_methods, fees),
 // Postgres returns a "column ... does not exist" (code 42703). Strip those keys and
 // retry so the app keeps working until the one-time migration is run.
-const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department'];
+const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start'];
 function isMissingColumnError(error) {
   return error && (error.code === '42703' || /column .* does not exist|Could not find/i.test(error.message || ''));
 }
@@ -2234,6 +2244,8 @@ async function saveJob() {
   const commission = (netPrice(price, fees) * commissionRate) / 100;
   // Department the sale belongs to (drives manager visibility)
   const department = (document.getElementById('f-department') || {}).value || state.currentDept || '';
+  // Pay period this sale counts in — auto-set from the sale date, movable later
+  const payPeriodStart = ppStartForDate(date) || ppCurrentStart();
 
   // For backward compat & display: also store first item as "equipment" + "brand" top-level
   const firstItem = items[0];
@@ -2251,6 +2263,7 @@ async function saveJob() {
     paymentMethods,
     fees,
     department,
+    payPeriodStart,
     managerNotes,
     salesNotes,
     flip,
@@ -2378,6 +2391,7 @@ function renderJobs() {
         <span class="badge badge-status-${statusClass(j.status)}">${j.status}</span>
         <span class="badge badge-person">${escapeHtml(j.salesperson)}</span>
         ${j.department ? `<span class="badge badge-dept">${escapeHtml(j.department)}</span>` : ''}
+        ${j.payPeriodStart && j.payPeriodStart !== ppStartForDate(j.date) ? '<span class="badge badge-moved">⤳ carried</span>' : ''}
         ${payBadges}
         <span class="badge-date">${formatDate(j.date)}</span>
       </div>
@@ -2456,6 +2470,8 @@ function renderJobReadOnly(j) {
       <tr><td style="padding:6px 0; color:var(--gray-500);">Payment</td><td style="padding:6px 0; text-align:right; font-weight:600;">${(j.paymentMethods && j.paymentMethods.length) ? escapeHtml(j.paymentMethods.join(', ')) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Date Sold</td><td style="padding:6px 0; text-align:right; font-weight:600;">${formatDate(j.date)}</td></tr>
     </table>
+
+    ${payPeriodBlockHtml(j)}
 
     ${sumFees(j.fees) > 0 ? `
     <div class="form-label">Fee Deductions</div>
@@ -2557,6 +2573,8 @@ function renderJobEditForm(j) {
         ${DEPARTMENTS.map(d => `<option value="${escapeHtml(d)}" ${d === (j.department || state.currentDept) ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('')}
       </select>
     </div>
+
+    ${payPeriodBlockHtml(j)}
 
     <div class="form-group">
       <label class="form-label">Payment Method</label>
@@ -2763,120 +2781,128 @@ async function deleteJob(id) {
 }
 
 // ============== DASHBOARD ==============
-function setDashFilter(filter, btn) {
-  state.dashFilter = filter;
-  // Selecting a preset clears any specific-month pick
-  state.dashMonth = '';
-  const sel = document.getElementById('monthPicker');
-  if (sel) sel.value = '';
-  document.querySelectorAll('#screen-dashboard .filter-pill').forEach(p => p.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+// ============== PAY PERIODS ==============
+// Biweekly (14-day) cycles anchored on Jun 8 2026, e.g. Jun 8–21, Jun 22–Jul 5, …
+const PP_ANCHOR = Date.UTC(2026, 5, 8); // period boundary (a period START date)
+const PP_LEN = 14;
+const PP_DAY = 86400000;
+const PP_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function ppDateToUTC(dateStr) {
+  const p = String(dateStr).slice(0, 10).split('-');
+  return Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+}
+function ppFromUTC(ms) {
+  const d = new Date(ms);
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+}
+function ppIndexForDate(dateStr) {
+  return Math.floor((ppDateToUTC(dateStr) - PP_ANCHOR) / (PP_LEN * PP_DAY));
+}
+function ppStartForIndex(i) { return ppFromUTC(PP_ANCHOR + i * PP_LEN * PP_DAY); }
+function ppStartForDate(dateStr) { return dateStr ? ppStartForIndex(ppIndexForDate(dateStr)) : ''; }
+function ppEndForStart(startStr) { return ppFromUTC(ppDateToUTC(startStr) + (PP_LEN - 1) * PP_DAY); }
+function ppLabel(startStr) {
+  if (!startStr) return '';
+  const s = startStr.split('-'), e = ppEndForStart(startStr).split('-');
+  return `${PP_MONTHS[+s[1] - 1]} ${+s[2]} – ${PP_MONTHS[+e[1] - 1]} ${+e[2]}, ${e[0]}`;
+}
+function ppTodayStr() {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+}
+function ppCurrentStart() { return ppStartForDate(ppTodayStr()); }
+// The pay period a job counts in: its stored period, else derived from the sale date
+function jobPeriodStart(j) { return j.payPeriodStart || ppStartForDate(j.date); }
+// The period currently selected on the dashboard ('all' or a start date)
+function selectedPeriod() { return state.dashPeriod || ppCurrentStart(); }
+
+function setDashPeriod(value) {
+  state.dashPeriod = value; // 'all' or 'YYYY-MM-DD'
   renderDashboard();
 }
-
-// Called when a specific month is chosen from the dropdown
-function setDashMonth(value) {
-  state.dashMonth = value; // "YYYY-MM" or ""
-  if (value) {
-    state.dashFilter = 'specific';
-    document.querySelectorAll('#screen-dashboard .filter-pill').forEach(p => p.classList.remove('active'));
-  } else {
-    // Empty selection falls back to This Month
-    state.dashFilter = 'month';
-    const pills = document.querySelectorAll('#screen-dashboard .filter-pill');
-    pills.forEach(p => p.classList.remove('active'));
-    if (pills[0]) pills[0].classList.add('active');
-  }
+// Step the selected period backward/forward (ignores 'all' — starts from current)
+function shiftDashPeriod(dir) {
+  const base = (state.dashPeriod && state.dashPeriod !== 'all') ? state.dashPeriod : ppCurrentStart();
+  state.dashPeriod = ppStartForIndex(ppIndexForDate(base) + dir);
   renderDashboard();
-}
-
-// Turn a job's stored date ("YYYY-MM-DD") into {y, m} using the calendar
-// value directly, with NO timezone conversion (avoids the UTC-shift bug that
-// pushed the 1st of a month back into the previous month).
-function jobYearMonth(dateStr) {
-  if (!dateStr) return null;
-  const parts = String(dateStr).slice(0, 10).split('-');
-  if (parts.length < 2) return null;
-  return { y: parseInt(parts[0], 10), m: parseInt(parts[1], 10) }; // m is 1-12
 }
 
 function filterByPeriod(jobs) {
-  if (state.dashFilter === 'all') return jobs;
-  const now = new Date();
-  const curY = now.getFullYear();
-  const curM = now.getMonth() + 1; // 1-12
-
-  // Specific month picked from the dropdown ("YYYY-MM")
-  if (state.dashFilter === 'specific' && state.dashMonth) {
-    const [sy, sm] = state.dashMonth.split('-').map(n => parseInt(n, 10));
-    return jobs.filter(j => {
-      const ym = jobYearMonth(j.date);
-      return ym && ym.y === sy && ym.m === sm;
-    });
-  }
-
-  // "Last Month" — the single calendar month before the current one
-  if (state.dashFilter === 'lastmonth') {
-    let ly = curY, lm = curM - 1;
-    if (lm === 0) { lm = 12; ly = curY - 1; }
-    return jobs.filter(j => {
-      const ym = jobYearMonth(j.date);
-      return ym && ym.y === ly && ym.m === lm;
-    });
-  }
-
-  // Range presets: compare on year/month numbers so the 1st is always included
-  return jobs.filter(j => {
-    const ym = jobYearMonth(j.date);
-    if (!ym) return false;
-    const jobIndex = ym.y * 12 + ym.m;      // sortable month index
-    if (state.dashFilter === 'month') {
-      return ym.y === curY && ym.m === curM;
-    } else if (state.dashFilter === 'quarter') {
-      const qStartMonth = Math.floor((curM - 1) / 3) * 3 + 1;
-      const startIndex = curY * 12 + qStartMonth;
-      return jobIndex >= startIndex && ym.y === curY;
-    } else if (state.dashFilter === 'year') {
-      return ym.y === curY;
-    }
-    return true;
-  });
+  const sel = selectedPeriod();
+  if (sel === 'all') return jobs;
+  return jobs.filter(j => jobPeriodStart(j) === sel);
 }
 
-function populateMonthPicker() {
-  const sel = document.getElementById('monthPicker');
+// Who may move a sale between pay periods: Admin, the dept Manager, or the seller
+function canMovePeriod(j) {
+  if (state.currentRole === 'view') return false;
+  if (state.currentTitle === 'Admin') return true;
+  if (state.currentTitle === 'Manager' && (j.department || '') === (state.currentDept || '')) return true;
+  return j.salesperson === state.currentUser || j.createdBy === state.currentUser;
+}
+
+async function moveJobPeriod(id, dir) {
+  const j = state.jobs.find(x => x.id === id);
+  if (!j || !canMovePeriod(j)) return;
+  j.payPeriodStart = ppStartForIndex(ppIndexForDate(jobPeriodStart(j)) + dir);
+  j.lastEditedAt = new Date().toISOString();
+  j.lastEditedBy = state.currentUser || 'Unknown';
+  const ok = await dbUpdateJob(id, j);
+  if (!ok) return;
+  openJobDetail(id);   // refresh the open detail with the new period
+  renderJobs();
+  renderDashboard();
+  showToast(dir > 0 ? 'Moved to next pay period ✓' : 'Moved to previous pay period ✓');
+}
+
+// Pay-period summary + move controls, shared by the read-only and edit views
+function payPeriodBlockHtml(j) {
+  const start = jobPeriodStart(j);
+  const natural = ppStartForDate(j.date);
+  const moved = j.payPeriodStart && j.payPeriodStart !== natural;
+  const controls = canMovePeriod(j)
+    ? `<div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
+         <button class="btn btn-secondary btn-sm" onclick="moveJobPeriod('${j.id}', -1)">‹ Prev period</button>
+         <button class="btn btn-secondary btn-sm" onclick="moveJobPeriod('${j.id}', 1)">Move to next period ›</button>
+       </div>`
+    : '';
+  return `
+    <div style="margin-bottom:14px;">
+      <div class="form-label">Pay Period</div>
+      <div style="font-size:14px; padding:10px 12px; background:var(--gray-50); border-radius:8px; font-weight:600;">
+        ${ppLabel(start)}${moved ? ` <span style="color:var(--royal); font-weight:600; font-size:12px;">⤳ from ${ppLabel(natural)}</span>` : ''}
+      </div>
+      ${controls}
+    </div>`;
+}
+
+function populatePeriodPicker() {
+  const sel = document.getElementById('periodPicker');
   if (!sel) return;
-  // Gather the distinct year-months present in the (role-scoped) jobs
-  let source = state.jobs;
-  if (state.currentRole === 'rep' && state.currentUser) {
-    source = source.filter(j => j.salesperson === state.currentUser);
+  const curIdx = ppIndexForDate(ppTodayStr());
+
+  // Range: from the oldest period that has a (role-scoped) job up to one ahead of now.
+  let minIdx = curIdx - 6; // always offer a few recent periods even with no data
+  scopeJobsToUser(state.jobs).forEach(j => {
+    const ps = jobPeriodStart(j);
+    if (ps) minIdx = Math.min(minIdx, ppIndexForDate(ps));
+  });
+  const maxIdx = curIdx + 1; // allow logging into the upcoming period
+
+  const selected = selectedPeriod(); // resolves null -> current
+  let html = '';
+  for (let i = maxIdx; i >= minIdx; i--) {
+    const start = ppStartForIndex(i);
+    const tag = i === curIdx ? ' (current)' : (i === curIdx + 1 ? ' (upcoming)' : '');
+    html += `<option value="${start}" ${start === selected ? 'selected' : ''}>${ppLabel(start)}${tag}</option>`;
   }
-  const set = new Set();
-  source.forEach(j => {
-    const ym = jobYearMonth(j.date);
-    if (ym) set.add(ym.y * 100 + ym.m); // e.g. 202607
-  });
-  const codes = Array.from(set).sort((a, b) => b - a); // newest first
-  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const current = sel.value;
-  let html = '<option value="">Jump to a specific month…</option>';
-  codes.forEach(code => {
-    const y = Math.floor(code / 100);
-    const m = code % 100;
-    const val = y + '-' + String(m).padStart(2, '0');
-    html += '<option value="' + val + '">' + monthNames[m - 1] + ' ' + y + '</option>';
-  });
+  html += `<option value="all" ${selected === 'all' ? 'selected' : ''}>All time</option>`;
   sel.innerHTML = html;
-  // Preserve the current pick if it still exists
-  if (state.dashMonth && codes.includes(parseInt(state.dashMonth.replace('-', ''), 10))) {
-    sel.value = state.dashMonth;
-  } else {
-    sel.value = current && codes.includes(parseInt(current.replace('-',''),10)) ? current : '';
-  }
 }
 
 function renderDashboard() {
-  populateMonthPicker();
+  populatePeriodPicker();
   // PRIVACY: advisors/techs see only their own; managers see their department; admins see all
   let filtered = scopeJobsToUser(filterByPeriod(state.jobs));
 
