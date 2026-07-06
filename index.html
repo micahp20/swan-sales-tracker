@@ -1069,12 +1069,24 @@
       <label class="form-label">Password</label>
       <input class="form-input" type="password" id="login-password" autocomplete="current-password" placeholder="Your password" onkeydown="if(event.key==='Enter') doAuthAction()">
     </div>
+    <div id="forgot-row" style="text-align:right; margin:-4px 0 10px;">
+      <a href="#" id="forgot-link" onclick="doForgotPassword(event)" style="color:var(--royal); font-weight:600; font-size:12px; text-decoration:none;">Forgot password?</a>
+    </div>
     <div id="login-error" style="display:none; color:var(--red); font-size:13px; margin-bottom:10px;"></div>
     <div id="login-success" style="display:none; color:var(--green); font-size:13px; margin-bottom:10px;"></div>
     <button class="btn btn-primary" id="login-btn" style="width:100%;" onclick="doAuthAction()">Sign In</button>
-    <div style="text-align:center; margin-top:16px; font-size:13px; color:var(--gray-500);">
+    <div id="auth-toggle-row" style="text-align:center; margin-top:16px; font-size:13px; color:var(--gray-500);">
       <span id="auth-toggle-text">New here?</span>
       <a href="#" id="auth-toggle-link" onclick="toggleAuthMode(event)" style="color:var(--royal); font-weight:600; text-decoration:none;">Create an account</a>
+    </div>
+
+    <!-- Shown when the user follows a password-reset link -->
+    <div id="reset-panel" style="display:none;">
+      <div class="form-group">
+        <label class="form-label">New Password</label>
+        <input class="form-input" type="password" id="reset-password" autocomplete="new-password" placeholder="At least 6 characters" onkeydown="if(event.key==='Enter') doSetNewPassword()">
+      </div>
+      <button class="btn btn-primary" style="width:100%;" onclick="doSetNewPassword()">Update Password</button>
     </div>
   </div>
 </div>
@@ -1662,10 +1674,12 @@ function toggleAuthMode(e) {
   const okEl = document.getElementById('login-success');
   errEl.style.display = 'none';
   okEl.style.display = 'none';
+  const forgotRow = document.getElementById('forgot-row');
   if (authMode === 'signup') {
     nameGroup.style.display = 'block';
     deptGroup.style.display = 'block';
     titleGroup.style.display = 'block';
+    if (forgotRow) forgotRow.style.display = 'none';
     // Populate the dropdowns (with a "pick one" placeholder)
     const deptSel = document.getElementById('signup-department');
     const titleSel = document.getElementById('signup-title');
@@ -1685,6 +1699,7 @@ function toggleAuthMode(e) {
     nameGroup.style.display = 'none';
     deptGroup.style.display = 'none';
     titleGroup.style.display = 'none';
+    if (forgotRow) forgotRow.style.display = 'block';
     subtitle.textContent = 'Sign in to continue';
     btn.textContent = 'Sign In';
     toggleText.textContent = 'New here?';
@@ -1790,6 +1805,69 @@ async function doLogout() {
   if (!confirm('Sign out?')) return;
   try { await sbClient.auth.signOut(); } catch (e) {}
   location.reload();
+}
+
+// ============== PASSWORD RESET ==============
+// Step 1: email the user a secure reset link (back to this site)
+async function doForgotPassword(e) {
+  if (e) e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const errEl = document.getElementById('login-error');
+  const okEl = document.getElementById('login-success');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+  if (!SUPABASE_CONFIGURED) {
+    errEl.textContent = 'This app has not been connected to Supabase yet.';
+    errEl.style.display = 'block'; return;
+  }
+  if (!email) {
+    errEl.textContent = 'Enter your email above first, then tap “Forgot password?”.';
+    errEl.style.display = 'block'; return;
+  }
+  const { error } = await sbClient.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+  if (error) {
+    errEl.textContent = error.message || 'Could not send the reset email.';
+    errEl.style.display = 'block'; return;
+  }
+  okEl.textContent = 'Check your email for a password reset link.';
+  okEl.style.display = 'block';
+}
+
+// Step 2: user followed the link — swap the login form for a "set new password" panel
+function showResetPasswordForm() {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  ['signup-name-group','signup-dept-group','signup-title-group','forgot-row','login-btn','auth-toggle-row']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  document.getElementById('login-email').closest('.form-group').style.display = 'none';
+  document.getElementById('login-password').closest('.form-group').style.display = 'none';
+  document.getElementById('reset-panel').style.display = 'block';
+  const sub = document.getElementById('auth-subtitle'); if (sub) sub.textContent = 'Set a new password';
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('login-success').style.display = 'none';
+  setTimeout(() => { const f = document.getElementById('reset-password'); if (f) f.focus(); }, 100);
+}
+
+// Step 3: save the new password (the recovery link established a session), then enter the app
+async function doSetNewPassword() {
+  const pw = document.getElementById('reset-password').value;
+  const errEl = document.getElementById('login-error');
+  const okEl = document.getElementById('login-success');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+  if (!pw || pw.length < 6) {
+    errEl.textContent = 'Password must be at least 6 characters.';
+    errEl.style.display = 'block'; return;
+  }
+  const { error } = await sbClient.auth.updateUser({ password: pw });
+  if (error) {
+    errEl.textContent = error.message || 'Could not update password.';
+    errEl.style.display = 'block'; return;
+  }
+  okEl.textContent = 'Password updated! Signing you in…';
+  okEl.style.display = 'block';
+  // Drop the recovery token from the URL, then load the app
+  if (window.history && window.history.replaceState) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  setTimeout(() => startApp(), 800);
 }
 
 // Kept for compatibility with the Settings rename flow (no longer touches storage)
@@ -3202,6 +3280,17 @@ async function startApp() {
     document.getElementById('loginOverlay').style.display = 'flex';
     return;
   }
+  // Password recovery: fired when the user opens the emailed reset link
+  sbClient.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') showResetPasswordForm();
+  });
+
+  // If this page load IS a recovery link, wait for the reset form — don't auto-login
+  if (window.location.hash && window.location.hash.includes('type=recovery')) {
+    document.getElementById('loginOverlay').style.display = 'flex';
+    return;
+  }
+
   try {
     const { data: { session } } = await sbClient.auth.getSession();
     if (session) {
