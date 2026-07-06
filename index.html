@@ -1119,6 +1119,9 @@
       <select id="periodPicker" class="month-picker" onchange="setDashPeriod(this.value)" style="flex:1; min-width:0;"></select>
       <button class="pp-nav" onclick="shiftDashPeriod(1)" title="Next pay period" aria-label="Next pay period">›</button>
     </div>
+    <div style="margin:6px 0 2px; text-align:right;">
+      <button class="btn btn-secondary btn-sm" onclick="exportPeriodCsv()">⬇ Export (CSV)</button>
+    </div>
 
     <div class="stat-grid">
       <div class="stat">
@@ -2943,6 +2946,44 @@ function filterByPeriod(jobs) {
   const sel = selectedPeriod();
   if (sel === 'all') return jobs;
   return jobs.filter(j => jobPeriodStart(j) === sel);
+}
+
+// Export the currently-selected period's (role-scoped) sales as a CSV for payroll
+function exportPeriodCsv() {
+  const jobs = scopeJobsToUser(filterByPeriod(state.jobs));
+  const sel = selectedPeriod();
+  const periodName = sel === 'all' ? 'All time' : ppLabel(sel);
+  if (!jobs.length) { showToast('No sales in this period'); return; }
+
+  const esc = v => {
+    const s = (v == null ? '' : String(v));
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const headers = ['Date','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period'];
+  const lines = jobs.map(j => {
+    const items = (j.items && j.items.length ? j.items : [{ equipment: j.equipment, brand: j.brand }])
+      .map(it => it.equipment + (it.brand ? ' (' + it.brand + ')' : '')).join('; ');
+    return [
+      j.date || '', j.customer || '', j.salesperson || '', j.department || '', j.status || '',
+      (j.paymentMethods || []).join(' / '), items,
+      j.price || 0, sumFees(j.fees), netPrice(j.price, j.fees),
+      (j.commissionRate || 0) + '%', j.commission || 0, ppLabel(jobPeriodStart(j))
+    ].map(esc).join(',');
+  });
+  const tot = jobs.reduce((a, j) => {
+    a.sales += j.price || 0; a.fees += sumFees(j.fees); a.comm += j.commission || 0; return a;
+  }, { sales: 0, fees: 0, comm: 0 });
+  const totalsRow = ['TOTAL', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, ''].map(esc).join(',');
+
+  const csv = [headers.join(','), ...lines, totalsRow].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'swan-sales_' + periodName.replace(/[^0-9A-Za-z]+/g, '-').replace(/^-|-$/g, '') + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('Exported ' + jobs.length + ' sale' + (jobs.length !== 1 ? 's' : ''));
 }
 
 // Who may move a sale between pay periods: Admin, the dept Manager, or the seller
