@@ -616,6 +616,32 @@
   }
   .pp-nav:hover { background: var(--royal-pale); border-color: var(--royal); }
   .badge-moved { background: #FEF3C7; color: #92400E; }
+  .team-row {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .team-row:last-child { border-bottom: none; }
+  .team-name { font-weight: 700; font-size: 14px; color: var(--gray-900); }
+  .team-email { font-size: 12px; color: var(--gray-500); }
+  .team-controls {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .team-select {
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1.5px solid var(--gray-200);
+    background: white;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-700);
+    font-family: inherit;
+    flex: 1;
+    min-width: 110px;
+  }
   .period-header {
     display: flex;
     justify-content: space-between;
@@ -1272,6 +1298,14 @@
     </div>
 
     <div class="card">
+      <div class="card-title">Team Members</div>
+      <div style="font-size:12px; color:var(--gray-500); margin-bottom:10px;">
+        Everyone who has signed up. Fix someone's department/role, or deactivate someone who leaves.
+      </div>
+      <div id="team-list"><div style="font-size:13px; color:var(--gray-500); padding:8px 0;">Loading…</div></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Salespeople</div>
       <div id="salespeople-list"></div>
       <button class="btn btn-secondary btn-sm" onclick="addSalesperson()" style="margin-top:8px;">+ Add Salesperson</button>
@@ -1653,10 +1687,23 @@ async function loadProfile() {
   // Permission tier: Admin & Manager get edit powers ('gm'); advisors/techs are 'rep'
   state.currentRole = (title === 'Admin' || title === 'Manager') ? 'gm' : 'rep';
 
+  // Deactivation check (tolerant if the 'active' column isn't there yet)
+  try {
+    const chk = await sbClient.from('profiles').select('active').eq('id', user.id).single();
+    if (!chk.error && chk.data && chk.data.active === false) {
+      await sbClient.auth.signOut();
+      const errEl = document.getElementById('login-error');
+      if (errEl) { errEl.textContent = 'Your account has been deactivated. Contact an admin.'; errEl.style.display = 'block'; }
+      return false;
+    }
+  } catch (e) { /* column may not exist yet */ }
+
   // Self-heal: persist department/title onto the profile if they weren't stored yet
   if (!data || !data.department || !data.title) {
     try { await sbClient.from('profiles').upsert({ id: user.id, name, department, title }); } catch (e) { /* RLS/columns may block; session values still apply */ }
   }
+  // Backfill email for the Team screen (tolerant if the column isn't there yet)
+  try { await sbClient.from('profiles').update({ email: user.email }).eq('id', user.id); } catch (e) { /* no email column yet */ }
   return true;
 }
 
@@ -3095,10 +3142,62 @@ function renderDashboard() {
 
 // ============== SETTINGS ==============
 function renderSettings() {
+  renderTeamList();
   renderSalespeopleList();
   renderEquipmentList();
   renderBrandsList();
   renderTiersList();
+}
+
+// ============== TEAM / USER MANAGEMENT (Admin) ==============
+async function renderTeamList() {
+  const el = document.getElementById('team-list');
+  if (!el) return;
+  const { data, error } = await sbClient.from('profiles')
+    .select('id, name, email, department, title, active').order('name');
+  if (error) {
+    el.innerHTML = `<div style="font-size:13px; color:var(--gray-500); padding:8px 0;">Couldn't load team members yet. Run the admin SQL in Supabase (adds <code>email</code>/<code>active</code> columns + admin read access), then reopen Settings.</div>`;
+    console.error('renderTeamList:', error);
+    return;
+  }
+  if (!data || !data.length) {
+    el.innerHTML = `<div style="font-size:13px; color:var(--gray-500); padding:8px 0;">No team members found.</div>`;
+    return;
+  }
+  el.innerHTML = data.map(p => {
+    const inactive = p.active === false;
+    return `
+    <div class="team-row"${inactive ? ' style="opacity:0.55;"' : ''}>
+      <div class="team-main">
+        <div class="team-name">${escapeHtml(p.name || '(no name)')}${p.id === state.authUserId ? ' <span style="color:var(--royal); font-size:11px;">(you)</span>' : ''}</div>
+        ${p.email ? `<div class="team-email">${escapeHtml(p.email)}</div>` : ''}
+      </div>
+      <div class="team-controls">
+        <select class="team-select" onchange="updateProfileField('${p.id}','department',this.value)">
+          ${DEPARTMENTS.map(d => `<option ${d === p.department ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('')}
+        </select>
+        <select class="team-select" onchange="updateProfileField('${p.id}','title',this.value)">
+          ${TITLES.map(t => `<option ${t === p.title ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="toggleProfileActive('${p.id}', ${inactive})">${inactive ? 'Reactivate' : 'Deactivate'}</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function updateProfileField(id, field, value) {
+  const { error } = await sbClient.from('profiles').update({ [field]: value }).eq('id', id);
+  if (error) { showToast('Update failed'); console.error(error); return; }
+  showToast('Updated ✓');
+}
+
+async function toggleProfileActive(id, isInactive) {
+  if (id === state.authUserId) { alert("You can't deactivate your own account."); return; }
+  // isInactive true → reactivate (set active true); false → deactivate (set active false)
+  const { error } = await sbClient.from('profiles').update({ active: isInactive }).eq('id', id);
+  if (error) { showToast('Update failed'); console.error(error); return; }
+  renderTeamList();
+  showToast(isInactive ? 'Reactivated ✓' : 'Deactivated ✓');
 }
 
 function renderSalespeopleList() {
