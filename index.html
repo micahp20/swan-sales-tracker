@@ -618,6 +618,9 @@
   }
   .pp-nav:hover { background: var(--royal-pale); border-color: var(--royal); }
   .badge-moved { background: #FEF3C7; color: #92400E; }
+  .badge-approval-pending  { background: var(--amber-pale); color: var(--amber); }
+  .badge-approval-approved { background: var(--green-pale); color: var(--green); }
+  .badge-approval-rejected { background: var(--red-pale); color: var(--red); }
   .team-row {
     padding: 10px 0;
     border-bottom: 1px solid var(--gray-200);
@@ -1160,7 +1163,7 @@
       <div class="stat">
         <div class="stat-label" id="commissionLabel">My Commission</div>
         <div class="stat-value stat-green" id="statCommission">$0</div>
-        <div class="stat-sub">Earned</div>
+        <div class="stat-sub" id="commissionSub">Approved</div>
       </div>
       <div class="stat">
         <div class="stat-label">Avg Ticket</div>
@@ -1548,6 +1551,9 @@ function rowToJob(r) {
     salesNotes: r.sales_notes || '',
     flip: !!r.flip,
     flipDetail: r.flip_detail || '',
+    approvalStatus: r.approval_status || 'pending',
+    approvedBy: r.approved_by || '',
+    approvedAt: r.approved_at || '',
     createdAt: r.created_at,
     createdBy: r.created_by || '',
     lastEditedAt: r.last_edited_at,
@@ -1577,6 +1583,9 @@ function jobToRow(j) {
     sales_notes: j.salesNotes,
     flip: !!j.flip,
     flip_detail: j.flipDetail,
+    approval_status: j.approvalStatus || 'pending',
+    approved_by: j.approvedBy || null,
+    approved_at: j.approvedAt || null,
     created_by: j.createdBy,
     last_edited_at: j.lastEditedAt,
     last_edited_by: j.lastEditedBy
@@ -1629,7 +1638,7 @@ async function saveData() {
 // If the Supabase `jobs` table is missing the newer columns (payment_methods, fees),
 // Postgres returns a "column ... does not exist" (code 42703). Strip those keys and
 // retry so the app keeps working until the one-time migration is run.
-const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start', 'date_installed'];
+const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start', 'date_installed', 'approval_status', 'approved_by', 'approved_at'];
 function isMissingColumnError(error) {
   return error && (error.code === '42703' || /column .* does not exist|Could not find/i.test(error.message || ''));
 }
@@ -2422,6 +2431,9 @@ async function saveJob() {
     salesNotes,
     flip,
     flipDetail,
+    approvalStatus: 'pending',
+    approvedBy: '',
+    approvedAt: '',
     createdBy: state.currentUser || 'Unknown',
     lastEditedAt: new Date().toISOString(),
     lastEditedBy: state.currentUser || 'Unknown'
@@ -2561,6 +2573,7 @@ function jobCardHtml(j) {
       </div>
       <div class="job-meta">
         ${equipBadges}
+        ${approvalOf(j) !== 'approved' ? approvalBadgeHtml(j) : ''}
         <span class="badge badge-status-${statusClass(j.status)}">${j.status}</span>
         <span class="badge badge-person">${escapeHtml(j.salesperson)}</span>
         ${j.department ? `<span class="badge badge-dept">${escapeHtml(j.department)}</span>` : ''}
@@ -2574,6 +2587,77 @@ function jobCardHtml(j) {
 
 function statusClass(s) {
   return (s || '').toLowerCase().replace(/\s+/g, '-');
+}
+
+// ============== APPROVAL ==============
+function approvalOf(j) { return j.approvalStatus || 'pending'; }
+function approvalLabel(status) {
+  return status === 'approved' ? 'Approved'
+    : status === 'rejected' ? 'Rejected'
+    : 'Pending approval';
+}
+function approvalBadgeHtml(j) {
+  const s = approvalOf(j);
+  const icon = s === 'approved' ? '✓' : s === 'rejected' ? '✕' : '⏳';
+  return `<span class="badge badge-approval-${s}">${icon} ${approvalLabel(s)}</span>`;
+}
+// Only approved sales count toward payroll / commission payout.
+function isPayable(j) { return approvalOf(j) === 'approved'; }
+
+// Set a sale's approval decision (manager/admin action)
+async function setApproval(id, decision) {
+  const j = state.jobs.find(x => x.id === id);
+  if (!j) return;
+  if (decision === 'rejected' && !confirm('Reject this sale? This is final — it will be locked and excluded from payroll. Only an Admin can reopen it.')) return;
+  j.approvalStatus = decision;
+  if (decision === 'pending') { j.approvedBy = ''; j.approvedAt = ''; }
+  else { j.approvedBy = state.currentUser || 'Unknown'; j.approvedAt = new Date().toISOString(); }
+  j.lastEditedAt = new Date().toISOString();
+  j.lastEditedBy = state.currentUser || 'Unknown';
+  const ok = await dbUpdateJob(id, j);
+  if (!ok) return;
+  showToast(decision === 'approved' ? 'Sale approved' : decision === 'rejected' ? 'Sale rejected' : 'Sale reopened');
+  closeJobModal();
+  renderJobs();
+  renderDashboard();
+}
+
+// Approval decision panel shown to managers/admins inside the edit modal
+function approvalControlHtml(j) {
+  const s = approvalOf(j);
+  const isAdmin = state.currentTitle === 'Admin';
+  const when = j.approvedAt ? formatDate(String(j.approvedAt).slice(0, 10)) : '';
+  const who = j.approvedBy ? escapeHtml(j.approvedBy) : '';
+  let info;
+  if (s === 'approved') info = `Approved${who ? ' by ' + who : ''}${when ? ' · ' + when : ''}`;
+  else if (s === 'rejected') info = `Rejected${who ? ' by ' + who : ''}${when ? ' · ' + when : ''}`;
+  else info = 'Awaiting your review';
+
+  let buttons = '';
+  if (s === 'pending') {
+    buttons = `
+      <button class="btn btn-primary btn-sm" onclick="setApproval('${j.id}','approved')">✓ Approve</button>
+      <button class="btn btn-danger btn-sm" onclick="setApproval('${j.id}','rejected')">✕ Reject</button>`;
+  } else if (s === 'approved') {
+    buttons = `
+      <button class="btn btn-ghost btn-sm" onclick="setApproval('${j.id}','pending')">↩ Reopen</button>
+      <button class="btn btn-danger btn-sm" onclick="setApproval('${j.id}','rejected')">✕ Reject</button>`;
+  } else if (s === 'rejected' && isAdmin) {
+    buttons = `<button class="btn btn-ghost btn-sm" onclick="setApproval('${j.id}','pending')">↩ Reopen (Admin)</button>`;
+  }
+
+  return `
+    <div style="border:1px solid var(--gray-200); border-radius:10px; padding:12px; margin-bottom:14px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:${buttons ? '10px' : '0'};">
+        <div>
+          <div style="font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--gray-500); font-weight:700;">Approval</div>
+          <div style="font-size:13px; color:var(--gray-700); margin-top:2px;">${info}</div>
+        </div>
+        ${approvalBadgeHtml(j)}
+      </div>
+      ${buttons ? `<div class="btn-row">${buttons}</div>` : ''}
+      <div style="font-size:11px; color:var(--gray-500); margin-top:8px;">Only approved sales count toward commission &amp; payroll. Rejecting is final (Admin can reopen).</div>
+    </div>`;
 }
 
 // ============== FLIP TOGGLE ==============
@@ -2595,10 +2679,20 @@ function openJobDetail(id) {
 
   const isView = state.currentRole === 'view';
   const isRep = state.currentRole === 'rep';
+  const isAdmin = state.currentTitle === 'Admin';
   const isOwnJob = j.salesperson === state.currentUser;
+  const decided = j.approvalStatus === 'approved' || j.approvalStatus === 'rejected';
 
-  // Reps can only edit their own jobs (privacy enforced already, but defensive)
-  const canEdit = !isView && (state.currentRole === 'gm' || (isRep && isOwnJob));
+  // Edit rights:
+  //  - Rep: only their own job, and only while still pending (once a manager/admin
+  //    approves OR rejects it, the sale is closed off to the rep).
+  //  - Manager/Admin (gm): can edit any visible job — EXCEPT a rejected sale, which is
+  //    terminal and only an Admin may reopen/correct.
+  let canEdit;
+  if (isView) canEdit = false;
+  else if (isRep) canEdit = isOwnJob && !decided;
+  else if (j.approvalStatus === 'rejected') canEdit = isAdmin;
+  else canEdit = true;
 
   const detailEl = document.getElementById('jobDetail');
 
@@ -2621,7 +2715,18 @@ function renderJobReadOnly(j) {
   ).join('');
   const rateDisplay = j.commissionRate != null ? `${j.commissionRate}%` : `${getCommissionRate(j.price)}%`;
 
+  const s = approvalOf(j);
+  const who = j.approvedBy ? ' by ' + escapeHtml(j.approvedBy) : '';
+  const when = j.approvedAt ? ' · ' + formatDate(String(j.approvedAt).slice(0, 10)) : '';
+  const bannerBg = s === 'approved' ? 'var(--green-pale)' : s === 'rejected' ? 'var(--red-pale)' : 'var(--amber-pale)';
+  const bannerFg = s === 'approved' ? 'var(--green)' : s === 'rejected' ? 'var(--red)' : 'var(--amber)';
+  const bannerText = s === 'approved' ? `✓ Approved${who}${when} — locked, no longer editable`
+    : s === 'rejected' ? `✕ Rejected${who}${when} — locked`
+    : '⏳ Pending approval — a manager will review this sale';
+  const approvalBanner = `<div style="background:${bannerBg}; color:${bannerFg}; padding:8px 12px; border-radius:8px; font-size:12px; font-weight:600; margin-bottom:14px;">${bannerText}</div>`;
+
   return `
+    ${approvalBanner}
     <div style="font-size:18px; font-weight:700; margin-bottom:14px;">${escapeHtml(j.customer)}</div>
 
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px;">
@@ -2687,11 +2792,14 @@ function renderJobReadOnly(j) {
 function renderJobEditForm(j) {
   const items = j.items && j.items.length ? j.items : [{ equipment: j.equipment, brand: j.brand || '' }];
   const currentRate = j.commissionRate != null ? j.commissionRate : getCommissionRate(j.price);
+  const isGM = state.currentRole === 'gm';
 
   return `
     <div style="background:var(--royal-pale); color:var(--royal-dark); padding:8px 12px; border-radius:8px; font-size:12px; font-weight:600; margin-bottom:14px;">
       ✏️ Full edit access — changes save instantly to the whole team
     </div>
+
+    ${isGM ? approvalControlHtml(j) : ''}
 
     <div class="form-group">
       <label class="form-label">Customer Name</label>
@@ -3019,16 +3127,20 @@ function filterByPeriod(jobs) {
 
 // Export the currently-selected period's (role-scoped) sales as a CSV for payroll
 function exportPeriodCsv() {
-  const jobs = scopeJobsToUser(filterByPeriod(state.jobs));
+  const scoped = scopeJobsToUser(filterByPeriod(state.jobs));
   const sel = selectedPeriod();
   const periodName = sel === 'all' ? 'All time' : ppLabel(sel);
-  if (!jobs.length) { showToast('No sales in this period'); return; }
+  if (!scoped.length) { showToast('No sales in this period'); return; }
+  // Payroll = approved sales only. Pending/rejected are excluded (and reported below).
+  const jobs = scoped.filter(isPayable);
+  const excluded = scoped.length - jobs.length;
+  if (!jobs.length) { showToast(`No approved sales to export (${excluded} pending/rejected)`); return; }
 
   const esc = v => {
     const s = (v == null ? '' : String(v));
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const headers = ['Date Sold','Date Installed','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period'];
+  const headers = ['Date Sold','Date Installed','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period','Approved By'];
   const lines = jobs.map(j => {
     const items = (j.items && j.items.length ? j.items : [{ equipment: j.equipment, brand: j.brand }])
       .map(it => it.equipment + (it.brand ? ' (' + it.brand + ')' : '')).join('; ');
@@ -3036,13 +3148,13 @@ function exportPeriodCsv() {
       j.date || '', j.dateInstalled || '', j.customer || '', j.salesperson || '', j.department || '', j.status || '',
       (j.paymentMethods || []).join(' / '), items,
       j.price || 0, sumFees(j.fees), netPrice(j.price, j.fees),
-      (j.commissionRate || 0) + '%', j.commission || 0, ppLabel(jobPeriodStart(j))
+      (j.commissionRate || 0) + '%', j.commission || 0, ppLabel(jobPeriodStart(j)), j.approvedBy || ''
     ].map(esc).join(',');
   });
   const tot = jobs.reduce((a, j) => {
     a.sales += j.price || 0; a.fees += sumFees(j.fees); a.comm += j.commission || 0; return a;
   }, { sales: 0, fees: 0, comm: 0 });
-  const totalsRow = ['TOTAL', '', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, ''].map(esc).join(',');
+  const totalsRow = ['TOTAL', '', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, '', ''].map(esc).join(',');
 
   const csv = [headers.join(','), ...lines, totalsRow].join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -3052,7 +3164,8 @@ function exportPeriodCsv() {
   a.download = 'swan-sales_' + periodName.replace(/[^0-9A-Za-z]+/g, '-').replace(/^-|-$/g, '') + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  showToast('Exported ' + jobs.length + ' sale' + (jobs.length !== 1 ? 's' : ''));
+  showToast('Exported ' + jobs.length + ' approved sale' + (jobs.length !== 1 ? 's' : '') +
+    (excluded ? ` · ${excluded} pending/rejected excluded` : ''));
 }
 
 // Who may move a sale between pay periods: Admin, the dept Manager, or the seller
@@ -3133,13 +3246,19 @@ function renderDashboard() {
 
   // Commission across the jobs you can see. Reps are already filtered to their own
   // jobs (so this is "My Commission"); managers/viewers see the whole team's payout.
-  const commission = filtered.reduce((s, j) => s + (j.commission || 0), 0);
+  // Only APPROVED sales count toward payout — pending/rejected are excluded.
+  const commission = filtered.reduce((s, j) => s + (isPayable(j) ? (j.commission || 0) : 0), 0);
+  const pending = filtered.filter(j => approvalOf(j) === 'pending');
+  const pendingComm = pending.reduce((s, j) => s + (j.commission || 0), 0);
   const isRep = state.currentRole === 'rep';
 
   document.getElementById('statTotal').textContent = '$' + formatNum(total);
   document.getElementById('statCount').textContent = count + ' job' + (count !== 1 ? 's' : '');
   document.getElementById('commissionLabel').textContent = isRep ? 'My Commission' : 'Team Commission';
   document.getElementById('statCommission').textContent = '$' + formatNum(commission);
+  document.getElementById('commissionSub').textContent = pending.length
+    ? `Approved · ${pending.length} pending ($${formatNum(pendingComm)})`
+    : 'Approved';
   document.getElementById('statAvg').textContent = '$' + formatNum(avg);
 
   // Pipeline
