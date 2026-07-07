@@ -1191,9 +1191,14 @@
           <input class="form-input" id="f-date" type="date">
         </div>
         <div class="form-group">
-          <label class="form-label">Salesperson</label>
-          <select class="form-select" id="f-salesperson"></select>
+          <label class="form-label">Date Installed</label>
+          <input class="form-input" id="f-date-installed" type="date">
         </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Salesperson</label>
+        <select class="form-select" id="f-salesperson"></select>
       </div>
 
       <div class="form-group" id="f-department-group">
@@ -1526,6 +1531,7 @@ function rowToJob(r) {
     owner_id: r.owner_id,
     customer: r.customer || '',
     date: r.date,
+    dateInstalled: r.date_installed ? String(r.date_installed).slice(0, 10) : '',
     salesperson: r.salesperson || '',
     equipment: r.equipment || '',
     brand: r.brand || '',
@@ -1554,6 +1560,7 @@ function jobToRow(j) {
   const row = {
     customer: j.customer,
     date: j.date || null,
+    date_installed: j.dateInstalled || null,
     salesperson: j.salesperson,
     equipment: j.equipment,
     brand: j.brand,
@@ -1622,7 +1629,7 @@ async function saveData() {
 // If the Supabase `jobs` table is missing the newer columns (payment_methods, fees),
 // Postgres returns a "column ... does not exist" (code 42703). Strip those keys and
 // retry so the app keeps working until the one-time migration is run.
-const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start'];
+const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start', 'date_installed'];
 function isMissingColumnError(error) {
   return error && (error.code === '42703' || /column .* does not exist|Could not find/i.test(error.message || ''));
 }
@@ -2367,6 +2374,7 @@ function resetFormItems() {
 async function saveJob() {
   const customer = document.getElementById('f-customer').value.trim();
   const date = document.getElementById('f-date').value;
+  const dateInstalled = document.getElementById('f-date-installed').value;
   const salesperson = document.getElementById('f-salesperson').value;
   const statusVal = document.getElementById('f-status').value;
   const price = parseFloat(document.getElementById('f-price').value);
@@ -2378,6 +2386,8 @@ async function saveJob() {
   const items = getFormItems();
 
   if (!customer) { alert('Customer name required'); return; }
+  if (!date) { alert('Date Sold is required'); return; }
+  if (!dateInstalled) { alert('Date Installed is required'); return; }
   if (!price || price <= 0) { alert('Valid sale price required'); return; }
   if (!salesperson) { alert('Please pick a salesperson'); return; }
   if (!items.length) { alert('Add at least one equipment item'); return; }
@@ -2396,7 +2406,7 @@ async function saveJob() {
 
   const job = {
     owner_id: state.authUserId,
-    customer, date, salesperson,
+    customer, date, dateInstalled, salesperson,
     equipment: firstItem.equipment,
     brand: firstItem.brand,
     items: items, // full multi-item list
@@ -2632,6 +2642,7 @@ function renderJobReadOnly(j) {
       <tr><td style="padding:6px 0; color:var(--gray-500);">Status</td><td style="padding:6px 0; text-align:right;"><span class="badge badge-status-${statusClass(j.status)}">${j.status}</span></td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Payment</td><td style="padding:6px 0; text-align:right; font-weight:600;">${(j.paymentMethods && j.paymentMethods.length) ? escapeHtml(j.paymentMethods.join(', ')) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Date Sold</td><td style="padding:6px 0; text-align:right; font-weight:600;">${formatDate(j.date)}</td></tr>
+      <tr><td style="padding:6px 0; color:var(--gray-500);">Date Installed</td><td style="padding:6px 0; text-align:right; font-weight:600;">${j.dateInstalled ? formatDate(j.dateInstalled) : '—'}</td></tr>
     </table>
 
     ${payPeriodBlockHtml(j)}
@@ -2692,6 +2703,13 @@ function renderJobEditForm(j) {
         <label class="form-label">Date Sold</label>
         <input class="form-input edit-field" data-field="date" type="date" value="${j.date || ''}">
       </div>
+      <div class="form-group">
+        <label class="form-label">Date Installed</label>
+        <input class="form-input edit-field" data-field="dateInstalled" type="date" value="${j.dateInstalled || ''}">
+      </div>
+    </div>
+
+    <div class="form-row">
       <div class="form-group">
         <label class="form-label">Salesperson</label>
         <select class="form-select edit-field" data-field="salesperson">
@@ -2899,6 +2917,8 @@ async function saveJobEdits(id) {
   });
 
   if (!updates.customer) { alert('Customer name required'); return; }
+  if (!updates.date) { alert('Date Sold is required'); return; }
+  if (!updates.dateInstalled) { alert('Date Installed is required'); return; }
   if (!updates.price || updates.price <= 0) { alert('Valid sale price required'); return; }
   if (!items.length) { alert('Add at least one equipment item'); return; }
 
@@ -3008,12 +3028,12 @@ function exportPeriodCsv() {
     const s = (v == null ? '' : String(v));
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const headers = ['Date','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period'];
+  const headers = ['Date Sold','Date Installed','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period'];
   const lines = jobs.map(j => {
     const items = (j.items && j.items.length ? j.items : [{ equipment: j.equipment, brand: j.brand }])
       .map(it => it.equipment + (it.brand ? ' (' + it.brand + ')' : '')).join('; ');
     return [
-      j.date || '', j.customer || '', j.salesperson || '', j.department || '', j.status || '',
+      j.date || '', j.dateInstalled || '', j.customer || '', j.salesperson || '', j.department || '', j.status || '',
       (j.paymentMethods || []).join(' / '), items,
       j.price || 0, sumFees(j.fees), netPrice(j.price, j.fees),
       (j.commissionRate || 0) + '%', j.commission || 0, ppLabel(jobPeriodStart(j))
@@ -3022,7 +3042,7 @@ function exportPeriodCsv() {
   const tot = jobs.reduce((a, j) => {
     a.sales += j.price || 0; a.fees += sumFees(j.fees); a.comm += j.commission || 0; return a;
   }, { sales: 0, fees: 0, comm: 0 });
-  const totalsRow = ['TOTAL', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, ''].map(esc).join(',');
+  const totalsRow = ['TOTAL', '', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, ''].map(esc).join(',');
 
   const csv = [headers.join(','), ...lines, totalsRow].join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
