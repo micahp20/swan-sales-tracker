@@ -1,0 +1,25 @@
+{
+  "name": "SWAN Sales Tracker",
+  "short_name": "SWAN",
+  "display": "standalone",
+  "background_color": "#1E4FA8",
+  "theme_color": "#1E4FA8",
+  "start_url": ".",
+  "icons": [
+    {
+      "src": "/favicon-64.png",
+      "type": "image/png",
+      "sizes": "64x64"
+    },
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
+    }
+  ]
+}
