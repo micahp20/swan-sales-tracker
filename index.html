@@ -1145,10 +1145,19 @@
 
   <!-- DASHBOARD -->
   <div class="screen active" id="screen-dashboard">
-    <div class="filter-row" style="align-items:center; gap:8px;">
-      <button class="pp-nav" onclick="shiftDashPeriod(-1)" title="Previous pay period" aria-label="Previous pay period">‹</button>
+    <div class="filter-row" style="align-items:center; gap:8px; margin-bottom:6px;">
+      <select id="filterMode" class="month-picker" onchange="setFilterMode(this.value)" style="flex:0 0 auto;">
+        <option value="cycle">Pay Cycle</option>
+        <option value="month">Month</option>
+        <option value="year">Year</option>
+        <option value="ytd">Year to Date</option>
+      </select>
+      <button class="pp-nav" id="ppPrev" onclick="shiftDashPeriod(-1)" title="Previous pay period" aria-label="Previous pay period">‹</button>
       <select id="periodPicker" class="month-picker" onchange="setDashPeriod(this.value)" style="flex:1; min-width:0;"></select>
-      <button class="pp-nav" onclick="shiftDashPeriod(1)" title="Next pay period" aria-label="Next pay period">›</button>
+      <button class="pp-nav" id="ppNext" onclick="shiftDashPeriod(1)" title="Next pay period" aria-label="Next pay period">›</button>
+    </div>
+    <div class="filter-row" id="deptFilterRow" style="align-items:center; gap:8px; margin-bottom:6px; display:none;">
+      <select id="deptFilter" class="month-picker" onchange="setDeptFilter(this.value)" style="flex:1; min-width:0;"></select>
     </div>
     <div style="margin:6px 0 2px; text-align:right;">
       <button class="btn btn-secondary btn-sm" onclick="exportPeriodCsv()">⬇ Export (CSV)</button>
@@ -1183,9 +1192,15 @@
     <div class="card">
       <div class="card-title">New Sale</div>
 
-      <div class="form-group">
-        <label class="form-label">Customer Name</label>
-        <input class="form-input" id="f-customer" placeholder="John Smith" autocomplete="off">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Customer Name</label>
+          <input class="form-input" id="f-customer" placeholder="John Smith" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Job Number</label>
+          <input class="form-input" id="f-job-number" placeholder="e.g. 10432" autocomplete="off">
+        </div>
       </div>
 
       <div class="form-row">
@@ -1297,6 +1312,9 @@
       <button class="filter-pill" onclick="setJobFilter('Sold', this)">Sold</button>
       <button class="filter-pill" onclick="setJobFilter('Paid', this)">Paid</button>
       <button class="filter-pill" onclick="setJobFilter('Not Paid', this)">Not Paid</button>
+    </div>
+    <div class="filter-row" id="deptFilterJobsRow" style="margin-bottom:10px; display:none;">
+      <select id="deptFilterJobs" class="month-picker" onchange="setDeptFilter(this.value)" style="flex:1; min-width:0;"></select>
     </div>
     <div class="job-list" id="jobList"></div>
   </div>
@@ -1499,6 +1517,10 @@ let state = {
   currentDept: null,  // 'HVAC' | 'Electrical' | 'Plumbing' | 'Office Staff'
   pendingRole: null, // staging during user picker
   dashPeriod: null, // selected pay-period start 'YYYY-MM-DD', or 'all' (null = current)
+  filterMode: 'cycle', // 'cycle' | 'month' | 'year' | 'ytd'
+  filterMonth: null,   // 'YYYY-MM' or 'all' (null = current month)
+  filterYear: null,    // 'YYYY' or 'all' (null = current year)
+  deptFilter: 'all',   // company-wide viewers can narrow to one department
   jobFilter: 'all',
   jobSearch: '',
   authUserId: null,
@@ -1513,14 +1535,24 @@ const DEPARTMENTS = ['HVAC', 'Electrical', 'Plumbing', 'Office Staff'];
 const TITLES = ['Comfort Advisor', 'Technician', 'Admin', 'Manager'];
 
 // Which jobs the current user is allowed to see (UI-level scoping)
+function isCompanyWide() {
+  return state.currentTitle === 'Admin' || state.currentRole === 'view';
+}
 function scopeJobsToUser(jobs) {
   const t = state.currentTitle;
-  if (t === 'Admin' || state.currentRole === 'view') return jobs;         // company-wide
-  if (t === 'Manager') {
+  let out;
+  if (isCompanyWide()) out = jobs;                                        // Admin / viewer: everyone
+  else if (t === 'Manager') {
     const dept = state.currentDept || '';
-    return jobs.filter(j => (j.department || '') === dept);               // own department
+    out = jobs.filter(j => (j.department || '') === dept);                // own department
+  } else {
+    out = jobs.filter(j => j.salesperson === state.currentUser);         // own sales only
   }
-  return jobs.filter(j => j.salesperson === state.currentUser);           // own sales only
+  // Company-wide viewers can narrow to a single department via the dashboard dropdown.
+  if (isCompanyWide() && state.deptFilter && state.deptFilter !== 'all') {
+    out = out.filter(j => (j.department || '') === state.deptFilter);
+  }
+  return out;
 }
 const SHARED_KEY = 'swan_app_data';
 const SYNC_INTERVAL_MS = 8000; // Auto-refresh every 8 seconds
@@ -1533,6 +1565,7 @@ function rowToJob(r) {
     id: r.id,
     owner_id: r.owner_id,
     customer: r.customer || '',
+    jobNumber: r.job_number || '',
     date: r.date,
     dateInstalled: r.date_installed ? String(r.date_installed).slice(0, 10) : '',
     salesperson: r.salesperson || '',
@@ -1565,6 +1598,7 @@ function rowToJob(r) {
 function jobToRow(j) {
   const row = {
     customer: j.customer,
+    job_number: j.jobNumber || null,
     date: j.date || null,
     date_installed: j.dateInstalled || null,
     salesperson: j.salesperson,
@@ -1638,7 +1672,7 @@ async function saveData() {
 // If the Supabase `jobs` table is missing the newer columns (payment_methods, fees),
 // Postgres returns a "column ... does not exist" (code 42703). Strip those keys and
 // retry so the app keeps working until the one-time migration is run.
-const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start', 'date_installed', 'approval_status', 'approved_by', 'approved_at'];
+const OPTIONAL_JOB_COLUMNS = ['payment_methods', 'fees', 'department', 'pay_period_start', 'date_installed', 'approval_status', 'approved_by', 'approved_at', 'job_number'];
 function isMissingColumnError(error) {
   return error && (error.code === '42703' || /column .* does not exist|Could not find/i.test(error.message || ''));
 }
@@ -2382,6 +2416,7 @@ function resetFormItems() {
 
 async function saveJob() {
   const customer = document.getElementById('f-customer').value.trim();
+  const jobNumber = document.getElementById('f-job-number').value.trim();
   const date = document.getElementById('f-date').value;
   const dateInstalled = document.getElementById('f-date-installed').value;
   const salesperson = document.getElementById('f-salesperson').value;
@@ -2415,7 +2450,7 @@ async function saveJob() {
 
   const job = {
     owner_id: state.authUserId,
-    customer, date, dateInstalled, salesperson,
+    customer, jobNumber, date, dateInstalled, salesperson,
     equipment: firstItem.equipment,
     brand: firstItem.brand,
     items: items, // full multi-item list
@@ -2445,6 +2480,7 @@ async function saveJob() {
 
   // Clear form
   document.getElementById('f-customer').value = '';
+  document.getElementById('f-job-number').value = '';
   document.getElementById('f-price').value = '';
   document.getElementById('f-manager-notes').value = '';
   document.getElementById('f-sales-notes').value = '';
@@ -2489,6 +2525,7 @@ function setJobSearch(value) {
 
 function renderJobs() {
   const list = document.getElementById('jobList');
+  populateDeptFilter();
   // PRIVACY: advisors/techs see only their own; managers see their department; admins see all
   let jobs = scopeJobsToUser([...state.jobs]);
 
@@ -2506,7 +2543,7 @@ function renderJobs() {
         ? j.items.map(it => (it.equipment || '') + ' ' + (it.brand || '')).join(' ')
         : ((j.equipment || '') + ' ' + (j.brand || ''));
       const haystack = [
-        j.customer, j.salesperson, itemsText,
+        j.customer, j.jobNumber, j.salesperson, itemsText,
         j.status, j.managerNotes, j.salesNotes, j.flipDetail
       ].join(' ').toLowerCase();
       return haystack.includes(q);
@@ -2563,7 +2600,7 @@ function jobCardHtml(j) {
     <div class="job-item" onclick="openJobDetail('${j.id}')">
       <div class="job-head">
         <div>
-          <div class="job-customer">${escapeHtml(j.customer)}</div>
+          <div class="job-customer">${escapeHtml(j.customer)}${j.jobNumber ? ` <span style="font-weight:600; color:var(--gray-500); font-size:12px;">#${escapeHtml(j.jobNumber)}</span>` : ''}</div>
         </div>
         <div style="text-align:right;">
           <div class="job-price">$${formatNum(j.price)}</div>
@@ -2742,6 +2779,7 @@ function renderJobReadOnly(j) {
     </div>
 
     <table style="width:100%; font-size:14px; margin-bottom:14px;">
+      <tr><td style="padding:6px 0; color:var(--gray-500);">Job Number</td><td style="padding:6px 0; text-align:right; font-weight:600;">${j.jobNumber ? escapeHtml(j.jobNumber) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Salesperson</td><td style="padding:6px 0; text-align:right; font-weight:600;">${escapeHtml(j.salesperson)}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Department</td><td style="padding:6px 0; text-align:right; font-weight:600;">${j.department ? escapeHtml(j.department) : '—'}</td></tr>
       <tr><td style="padding:6px 0; color:var(--gray-500);">Status</td><td style="padding:6px 0; text-align:right;"><span class="badge badge-status-${statusClass(j.status)}">${j.status}</span></td></tr>
@@ -2801,9 +2839,15 @@ function renderJobEditForm(j) {
 
     ${isGM ? approvalControlHtml(j) : ''}
 
-    <div class="form-group">
-      <label class="form-label">Customer Name</label>
-      <input class="form-input edit-field" data-field="customer" value="${escapeHtml(j.customer)}">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Customer Name</label>
+        <input class="form-input edit-field" data-field="customer" value="${escapeHtml(j.customer)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Job Number</label>
+        <input class="form-input edit-field" data-field="jobNumber" value="${escapeHtml(j.jobNumber || '')}">
+      </div>
     </div>
 
     <div class="form-row">
@@ -3108,29 +3152,88 @@ function jobPeriodStart(j) { return j.payPeriodStart || ppStartForDate(j.date); 
 // The period currently selected on the dashboard ('all' or a start date)
 function selectedPeriod() { return state.dashPeriod || ppCurrentStart(); }
 
+// The dynamic value picker routes to the right piece of state by filter mode
 function setDashPeriod(value) {
-  state.dashPeriod = value; // 'all' or 'YYYY-MM-DD'
+  const mode = state.filterMode || 'cycle';
+  if (mode === 'month') state.filterMonth = value;
+  else if (mode === 'year') state.filterYear = value;
+  else state.dashPeriod = value; // 'all' or 'YYYY-MM-DD'
   renderDashboard();
 }
-// Step the selected period backward/forward (ignores 'all' — starts from current)
+function setFilterMode(mode) {
+  state.filterMode = mode;
+  renderDashboard();
+}
+function setDeptFilter(value) {
+  state.deptFilter = value;
+  renderDashboard();
+  renderJobs();
+}
+// Step the selected pay period backward/forward (ignores 'all' — starts from current)
 function shiftDashPeriod(dir) {
   const base = (state.dashPeriod && state.dashPeriod !== 'all') ? state.dashPeriod : ppCurrentStart();
   state.dashPeriod = ppStartForIndex(ppIndexForDate(base) + dir);
   renderDashboard();
 }
 
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+function monthLabel(ym) { // 'YYYY-MM' -> 'July 2026'
+  const [y, m] = String(ym).split('-');
+  return (MONTH_NAMES[(parseInt(m, 10) || 1) - 1] || '') + ' ' + y;
+}
+function curYearStr() { return ppTodayStr().slice(0, 4); }
+function curMonthStr() { return ppTodayStr().slice(0, 7); }
+// Distinct YYYY-MM present in the (role-scoped) sale dates, newest first, plus the current month
+function distinctMonths() {
+  const set = new Set([curMonthStr()]);
+  scopeJobsToUser(state.jobs).forEach(j => { if (j.date) set.add(String(j.date).slice(0, 7)); });
+  return Array.from(set).sort().reverse();
+}
+function distinctYears() {
+  const set = new Set([curYearStr()]);
+  scopeJobsToUser(state.jobs).forEach(j => { if (j.date) set.add(String(j.date).slice(0, 4)); });
+  return Array.from(set).sort().reverse();
+}
+
+// Apply the active time filter (pay cycle / month / year / YTD) to a job list
 function filterByPeriod(jobs) {
+  const mode = state.filterMode || 'cycle';
+  if (mode === 'ytd') {
+    const start = curYearStr() + '-01-01';
+    const today = ppTodayStr();
+    return jobs.filter(j => j.date && j.date >= start && j.date <= today);
+  }
+  if (mode === 'month') {
+    const m = state.filterMonth || curMonthStr();
+    if (m === 'all') return jobs;
+    return jobs.filter(j => String(j.date || '').slice(0, 7) === m);
+  }
+  if (mode === 'year') {
+    const y = String(state.filterYear || curYearStr());
+    if (y === 'all') return jobs;
+    return jobs.filter(j => String(j.date || '').slice(0, 4) === y);
+  }
+  // Pay cycle (default)
   const sel = selectedPeriod();
   if (sel === 'all') return jobs;
   return jobs.filter(j => jobPeriodStart(j) === sel);
 }
 
+// Human label for the active filter (used in export filename + toasts)
+function activeFilterLabel() {
+  const mode = state.filterMode || 'cycle';
+  if (mode === 'ytd') return 'YTD ' + curYearStr();
+  if (mode === 'month') { const m = state.filterMonth || curMonthStr(); return m === 'all' ? 'All months' : monthLabel(m); }
+  if (mode === 'year') { const y = state.filterYear || curYearStr(); return y === 'all' ? 'All years' : String(y); }
+  const sel = selectedPeriod();
+  return sel === 'all' ? 'All time' : ppLabel(sel);
+}
+
 // Export the currently-selected period's (role-scoped) sales as a CSV for payroll
 function exportPeriodCsv() {
   const scoped = scopeJobsToUser(filterByPeriod(state.jobs));
-  const sel = selectedPeriod();
-  const periodName = sel === 'all' ? 'All time' : ppLabel(sel);
-  if (!scoped.length) { showToast('No sales in this period'); return; }
+  const periodName = activeFilterLabel();
+  if (!scoped.length) { showToast('No sales for ' + periodName); return; }
   // Payroll = approved sales only. Pending/rejected are excluded (and reported below).
   const jobs = scoped.filter(isPayable);
   const excluded = scoped.length - jobs.length;
@@ -3140,12 +3243,12 @@ function exportPeriodCsv() {
     const s = (v == null ? '' : String(v));
     return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
-  const headers = ['Date Sold','Date Installed','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period','Approved By'];
+  const headers = ['Job #','Date Sold','Date Installed','Customer','Salesperson','Department','Status','Payment','Equipment','Sale Price','Fees','Net','Commission Rate','Commission','Pay Period','Approved By'];
   const lines = jobs.map(j => {
     const items = (j.items && j.items.length ? j.items : [{ equipment: j.equipment, brand: j.brand }])
       .map(it => it.equipment + (it.brand ? ' (' + it.brand + ')' : '')).join('; ');
     return [
-      j.date || '', j.dateInstalled || '', j.customer || '', j.salesperson || '', j.department || '', j.status || '',
+      j.jobNumber || '', j.date || '', j.dateInstalled || '', j.customer || '', j.salesperson || '', j.department || '', j.status || '',
       (j.paymentMethods || []).join(' / '), items,
       j.price || 0, sumFees(j.fees), netPrice(j.price, j.fees),
       (j.commissionRate || 0) + '%', j.commission || 0, ppLabel(jobPeriodStart(j)), j.approvedBy || ''
@@ -3154,7 +3257,7 @@ function exportPeriodCsv() {
   const tot = jobs.reduce((a, j) => {
     a.sales += j.price || 0; a.fees += sumFees(j.fees); a.comm += j.commission || 0; return a;
   }, { sales: 0, fees: 0, comm: 0 });
-  const totalsRow = ['TOTAL', '', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, '', ''].map(esc).join(',');
+  const totalsRow = ['TOTAL', '', '', '', '', '', '', '', '', tot.sales, tot.fees, tot.sales - tot.fees, '', tot.comm, '', ''].map(esc).join(',');
 
   const csv = [headers.join(','), ...lines, totalsRow].join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -3214,25 +3317,69 @@ function payPeriodBlockHtml(j) {
 function populatePeriodPicker() {
   const sel = document.getElementById('periodPicker');
   if (!sel) return;
-  const curIdx = ppIndexForDate(ppTodayStr());
+  const mode = state.filterMode || 'cycle';
 
-  // Range: from the oldest period that has a (role-scoped) job up to one ahead of now.
-  let minIdx = curIdx - 6; // always offer a few recent periods even with no data
-  scopeJobsToUser(state.jobs).forEach(j => {
-    const ps = jobPeriodStart(j);
-    if (ps) minIdx = Math.min(minIdx, ppIndexForDate(ps));
-  });
-  const maxIdx = curIdx + 1; // allow logging into the upcoming period
+  // Keep the mode dropdown in sync
+  const modeSel = document.getElementById('filterMode');
+  if (modeSel) modeSel.value = mode;
 
-  const selected = selectedPeriod(); // resolves null -> current
-  let html = '';
-  for (let i = maxIdx; i >= minIdx; i--) {
-    const start = ppStartForIndex(i);
-    const tag = i === curIdx ? ' (current)' : (i === curIdx + 1 ? ' (upcoming)' : '');
-    html += `<option value="${start}" ${start === selected ? 'selected' : ''}>${ppLabel(start)}${tag}</option>`;
+  // Pay-cycle nav arrows only make sense in cycle mode
+  const prev = document.getElementById('ppPrev');
+  const next = document.getElementById('ppNext');
+  const showArrows = mode === 'cycle';
+  if (prev) prev.style.display = showArrows ? '' : 'none';
+  if (next) next.style.display = showArrows ? '' : 'none';
+
+  // YTD needs no value picker
+  if (mode === 'ytd') { sel.style.display = 'none'; }
+  else { sel.style.display = ''; }
+
+  if (mode === 'month') {
+    const months = distinctMonths();
+    const cur = state.filterMonth || curMonthStr();
+    sel.innerHTML = months.map(m => `<option value="${m}" ${m === cur ? 'selected' : ''}>${monthLabel(m)}</option>`).join('')
+      + `<option value="all" ${state.filterMonth === 'all' ? 'selected' : ''}>All months</option>`;
+  } else if (mode === 'year') {
+    const years = distinctYears();
+    const cur = String(state.filterYear || curYearStr());
+    sel.innerHTML = years.map(y => `<option value="${y}" ${String(y) === cur ? 'selected' : ''}>${y}</option>`).join('')
+      + `<option value="all" ${state.filterYear === 'all' ? 'selected' : ''}>All years</option>`;
+  } else if (mode === 'cycle') {
+    const curIdx = ppIndexForDate(ppTodayStr());
+    let minIdx = curIdx - 6; // always offer a few recent periods even with no data
+    scopeJobsToUser(state.jobs).forEach(j => {
+      const ps = jobPeriodStart(j);
+      if (ps) minIdx = Math.min(minIdx, ppIndexForDate(ps));
+    });
+    const maxIdx = curIdx + 1; // allow logging into the upcoming period
+    const selected = selectedPeriod();
+    let html = '';
+    for (let i = maxIdx; i >= minIdx; i--) {
+      const start = ppStartForIndex(i);
+      const tag = i === curIdx ? ' (current)' : (i === curIdx + 1 ? ' (upcoming)' : '');
+      html += `<option value="${start}" ${start === selected ? 'selected' : ''}>${ppLabel(start)}${tag}</option>`;
+    }
+    html += `<option value="all" ${selected === 'all' ? 'selected' : ''}>All time</option>`;
+    sel.innerHTML = html;
   }
-  html += `<option value="all" ${selected === 'all' ? 'selected' : ''}>All time</option>`;
-  sel.innerHTML = html;
+
+  populateDeptFilter();
+}
+
+// Department dropdown — only for company-wide viewers (Admin / viewer). Lets Katrina
+// view ALL jobs or drill into one department. Shown on both the dashboard and Sales tab.
+function populateDeptFilter() {
+  const cur = state.deptFilter || 'all';
+  const optionsHtml = `<option value="all" ${cur === 'all' ? 'selected' : ''}>All Departments</option>`
+    + DEPARTMENTS.map(d => `<option value="${escapeHtml(d)}" ${d === cur ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('');
+  [['deptFilterRow', 'deptFilter'], ['deptFilterJobsRow', 'deptFilterJobs']].forEach(([rowId, selId]) => {
+    const row = document.getElementById(rowId);
+    const sel = document.getElementById(selId);
+    if (!row || !sel) return;
+    if (!isCompanyWide()) { row.style.display = 'none'; return; }
+    row.style.display = '';
+    sel.innerHTML = optionsHtml;
+  });
 }
 
 function renderDashboard() {
