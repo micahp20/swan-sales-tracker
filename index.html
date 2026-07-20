@@ -1206,7 +1206,7 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Date Sold</label>
-          <input class="form-input" id="f-date" type="date">
+          <input class="form-input" id="f-date" type="date" oninput="populateAddPeriodPicker()">
         </div>
         <div class="form-group">
           <label class="form-label">Date Installed</label>
@@ -1222,6 +1222,12 @@
       <div class="form-group" id="f-department-group">
         <label class="form-label">Department</label>
         <select class="form-select" id="f-department"></select>
+      </div>
+
+      <div class="form-group" id="f-period-group">
+        <label class="form-label">Pay Period</label>
+        <select class="form-select" id="f-period"></select>
+        <div style="font-size:11px; color:var(--gray-500); margin-top:4px;">Defaults to the cycle for the Date Sold. Change it to log this sale in a different pay cycle.</div>
       </div>
 
       <div class="form-row">
@@ -1462,7 +1468,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 9;
+const APP_VERSION = 10;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -2095,6 +2101,8 @@ function showScreen(name, btn) {
     renderDepartmentDropdown('f-department', state.currentDept);
     // Department is auto-set to your own; only Admins may log for another department
     document.getElementById('f-department').disabled = (state.currentTitle !== 'Admin');
+    // Pay period defaults to the cycle for the sale date; the user may change it here
+    populateAddPeriodPicker();
     // Reset commission slider
     const slider = document.getElementById('f-commission-rate');
     if (slider) {
@@ -2442,8 +2450,12 @@ async function saveJob() {
   const commission = (netPrice(price, fees) * commissionRate) / 100;
   // Department the sale belongs to (drives manager visibility)
   const department = (document.getElementById('f-department') || {}).value || state.currentDept || '';
-  // Pay period this sale counts in — auto-set from the sale date, movable later
-  const payPeriodStart = ppStartForDate(date) || ppCurrentStart();
+  // Pay period this sale counts in — defaults to the sale date's cycle, but the user
+  // may have picked a different one in the form. Store an override only when it differs
+  // from the natural (sale-date) cycle, so unchanged sales stay clean.
+  const naturalPeriod = ppStartForDate(date) || ppCurrentStart();
+  const pickedPeriod = (document.getElementById('f-period') || {}).value || naturalPeriod;
+  const payPeriodStart = (pickedPeriod === naturalPeriod) ? '' : pickedPeriod;
 
   // For backward compat & display: also store first item as "equipment" + "brand" top-level
   const firstItem = items[0];
@@ -3271,18 +3283,68 @@ function exportPeriodCsv() {
     (excluded ? ` · ${excluded} pending/rejected excluded` : ''));
 }
 
-// Who may move a sale between pay periods: Admin, the dept Manager, or the seller
+// Who may move a sale between pay periods:
+//  - Admin: any sale.
+//  - Manager: any sale in their own department.
+//  - Rep / seller / creator: only their OWN sale, and only while it is still PENDING.
+//    Once a manager approves or rejects it, the sale is locked to the rep (matching the
+//    edit-lock rule elsewhere).
+//  - View (read-only observer): never.
 function canMovePeriod(j) {
   if (state.currentRole === 'view') return false;
   if (state.currentTitle === 'Admin') return true;
   if (state.currentTitle === 'Manager' && (j.department || '') === (state.currentDept || '')) return true;
-  return j.salesperson === state.currentUser || j.createdBy === state.currentUser;
+  const isOwn = j.salesperson === state.currentUser || j.createdBy === state.currentUser;
+  return isOwn && approvalOf(j) === 'pending';
 }
 
-async function moveJobPeriod(id, dir) {
+// <option> list for a pay-period picker: a window of cycles spanning the sale's natural
+// (sale-date) cycle, today's cycle, and the currently-selected one, tagged for clarity.
+function periodOptionsHtml(selectedStart, naturalStart) {
+  const curIdx = ppIndexForDate(ppTodayStr());
+  const natIdx = naturalStart ? ppIndexForDate(naturalStart) : curIdx;
+  const selIdx = selectedStart ? ppIndexForDate(selectedStart) : natIdx;
+  const minIdx = Math.min(curIdx, natIdx, selIdx) - 3;
+  const maxIdx = Math.max(curIdx, natIdx, selIdx) + 3;
+  let html = '';
+  for (let i = maxIdx; i >= minIdx; i--) {
+    const start = ppStartForIndex(i);
+    const tags = [];
+    if (i === natIdx) tags.push('sale date');
+    if (i === curIdx) tags.push('current');
+    else if (i === curIdx + 1) tags.push('upcoming');
+    const tag = tags.length ? ` (${tags.join(', ')})` : '';
+    html += `<option value="${start}" ${i === selIdx ? 'selected' : ''}>${ppLabel(start)}${tag}</option>`;
+  }
+  return html;
+}
+
+// Add-a-sale form: fill the pay-period picker from the current Date Sold (defaults to
+// that date's natural cycle). Called on modal open and whenever Date Sold changes.
+function populateAddPeriodPicker() {
+  const sel = document.getElementById('f-period');
+  if (!sel) return;
+  const dateStr = document.getElementById('f-date').value || ppTodayStr();
+  const natural = ppStartForDate(dateStr) || ppCurrentStart();
+  sel.innerHTML = periodOptionsHtml(natural, natural);
+}
+
+// Move an existing sale to a specific pay period (instant-save, like an inline edit).
+async function setJobPeriod(id, startStr) {
   const j = state.jobs.find(x => x.id === id);
-  if (!j || !canMovePeriod(j)) return;
-  j.payPeriodStart = ppStartForIndex(ppIndexForDate(jobPeriodStart(j)) + dir);
+  if (!j || !canMovePeriod(j) || !startStr) return;
+  const target = ppStartForDate(startStr);
+  if (target === jobPeriodStart(j)) return; // no change
+  // Moving an already-approved sale changes the totals of a period that may already
+  // have been submitted to payroll — make the mover confirm before proceeding.
+  if (approvalOf(j) === 'approved' &&
+      !confirm('This sale is APPROVED and may already be included in a submitted payroll.\n\nMoving it changes the totals of BOTH the old and new pay periods. Continue?')) {
+    openJobDetail(id); // reset the dropdown to its prior value
+    return;
+  }
+  // Store an override only when it differs from the natural (sale-date) cycle; if it
+  // matches, clear the override so the sale reads as un-moved.
+  j.payPeriodStart = (target === ppStartForDate(j.date)) ? '' : target;
   j.lastEditedAt = new Date().toISOString();
   j.lastEditedBy = state.currentUser || 'Unknown';
   const ok = await dbUpdateJob(id, j);
@@ -3290,19 +3352,19 @@ async function moveJobPeriod(id, dir) {
   openJobDetail(id);   // refresh the open detail with the new period
   renderJobs();
   renderDashboard();
-  showToast(dir > 0 ? 'Moved to next pay period ✓' : 'Moved to previous pay period ✓');
+  showToast('Pay period updated ✓');
 }
 
-// Pay-period summary + move controls, shared by the read-only and edit views
+// Pay-period summary + move control, shared by the read-only and edit views
 function payPeriodBlockHtml(j) {
   const start = jobPeriodStart(j);
   const natural = ppStartForDate(j.date);
   const moved = j.payPeriodStart && j.payPeriodStart !== natural;
-  const controls = canMovePeriod(j)
-    ? `<div style="display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;">
-         <button class="btn btn-secondary btn-sm" onclick="moveJobPeriod('${j.id}', -1)">‹ Prev period</button>
-         <button class="btn btn-secondary btn-sm" onclick="moveJobPeriod('${j.id}', 1)">Move to next period ›</button>
-       </div>`
+  const picker = canMovePeriod(j)
+    ? `<select class="form-select" style="margin-top:8px;" onchange="setJobPeriod('${j.id}', this.value)">
+         ${periodOptionsHtml(start, natural)}
+       </select>
+       <div style="font-size:11px; color:var(--gray-500); margin-top:6px;">Choose a pay cycle to move this sale into. The Date Sold stays unchanged on record.</div>`
     : '';
   return `
     <div style="margin-bottom:14px;">
@@ -3310,7 +3372,7 @@ function payPeriodBlockHtml(j) {
       <div style="font-size:14px; padding:10px 12px; background:var(--gray-50); border-radius:8px; font-weight:600;">
         ${ppLabel(start)}${moved ? ` <span style="color:var(--royal); font-weight:600; font-size:12px;">⤳ from ${ppLabel(natural)}</span>` : ''}
       </div>
-      ${controls}
+      ${picker}
     </div>`;
 }
 
