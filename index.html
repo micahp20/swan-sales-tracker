@@ -1525,7 +1525,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -2295,12 +2295,37 @@ async function saveProfileName() {
   const last = document.getElementById('pf-last').value.trim();
   const name = `${first} ${last}`.trim();
   if (!name) { alert('Please enter your name.'); return; }
+  const oldName = (state.currentUser || '').trim();
+  if (name === oldName) { showToast('That is already your name'); return; }
+
   const { error } = await sbClient.from('profiles').update({ name }).eq('id', state.authUserId);
   if (error) { showToast('Could not save name — try again'); console.error(error); return; }
   // Keep the auth metadata name in sync too (best-effort)
   try { await sbClient.auth.updateUser({ data: { name } }); } catch (e) { /* non-fatal */ }
   state.currentUser = name;
   updateUserBadge();
+
+  // Past sales store the salesperson name as text at log time, so a rename won't
+  // touch them automatically. Offer to carry the new name onto the old ones.
+  const priorCount = state.jobs.filter(j => j.salesperson === oldName).length;
+  if (oldName && priorCount > 0 &&
+      confirm(`Also update your name on your ${priorCount} past sale${priorCount !== 1 ? 's' : ''} logged as "${oldName}"?`)) {
+    const { error: jobErr } = await sbClient.from('jobs').update({ salesperson: name }).eq('salesperson', oldName);
+    if (jobErr) { showToast('Name saved, but past sales could not be updated'); console.error(jobErr); }
+    else {
+      state.jobs.forEach(j => { if (j.salesperson === oldName) j.salesperson = name; });
+      // Keep the salesperson picker list in sync, if the old name is in it
+      const idx = state.salespeople.indexOf(oldName);
+      if (idx !== -1 && !state.salespeople.includes(name)) {
+        state.salespeople[idx] = name;
+        try { await sbClient.from('settings').update({ salespeople: state.salespeople }).eq('id', 1); } catch (e) { /* non-fatal */ }
+      }
+      renderJobs();
+      renderDashboard();
+      showToast(`Name updated on ${priorCount} past sale${priorCount !== 1 ? 's' : ''} ✓`);
+      return;
+    }
+  }
   showToast('Name updated ✓');
 }
 
