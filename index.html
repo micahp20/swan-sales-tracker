@@ -1128,7 +1128,7 @@
     <div class="header-title">Sales Tracker</div>
     <div class="header-subtitle">SWAN Plumbing, Heating &amp; Air</div>
   </div>
-  <div class="header-user" id="userBadge">
+  <div class="header-user" id="userBadge" onclick="openProfile()" style="cursor:pointer;" title="Edit my profile">
     <span class="role-dot" id="roleDot"></span>
     <span id="userBadgeText">…</span>
   </div>
@@ -1411,6 +1411,63 @@
   </div>
 </div>
 
+<!-- MY PROFILE MODAL -->
+<div class="modal-overlay" id="profileModal" onclick="closeProfileModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title">My Profile</div>
+      <button class="modal-close" onclick="closeProfileModal()">×</button>
+    </div>
+
+    <div id="profileRoleLine" style="font-size:12px; color:var(--gray-500); margin-bottom:16px;"></div>
+
+    <!-- Name -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="card-title">Name</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">First Name</label>
+          <input class="form-input" id="pf-first" autocomplete="given-name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Last Name</label>
+          <input class="form-input" id="pf-last" autocomplete="family-name">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveProfileName()">Save Name</button>
+    </div>
+
+    <!-- Email -->
+    <div class="card" style="margin-bottom:14px;">
+      <div class="card-title">Email</div>
+      <div class="form-group">
+        <label class="form-label">Email Address</label>
+        <input class="form-input" id="pf-email" type="email" autocomplete="email">
+      </div>
+      <div style="font-size:11px; color:var(--gray-500); margin-bottom:10px;">
+        Changing your email sends a confirmation link to the new address. The change takes effect only after you click that link.
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="changeProfileEmail()">Update Email</button>
+    </div>
+
+    <!-- Password -->
+    <div class="card" style="margin-bottom:4px;">
+      <div class="card-title">Password</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">New Password</label>
+          <input class="form-input" id="pf-pw1" type="password" autocomplete="new-password" placeholder="At least 6 characters">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Confirm Password</label>
+          <input class="form-input" id="pf-pw2" type="password" autocomplete="new-password">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="changeProfilePassword()">Change Password</button>
+    </div>
+  </div>
+</div>
+
 <!-- USER PICKER MODAL -->
 <div class="modal-overlay" id="userModal" onclick="closeUserPicker(event)">
   <div class="modal" onclick="event.stopPropagation()">
@@ -1468,7 +1525,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 10;
+const APP_VERSION = 11;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -1530,6 +1587,7 @@ let state = {
   jobFilter: 'all',
   jobSearch: '',
   authUserId: null,
+  authEmail: '',
   lastSyncHash: null
 };
 
@@ -1722,6 +1780,7 @@ async function loadProfile() {
   const { data: { user } } = await sbClient.auth.getUser();
   if (!user) return false;
   state.authUserId = user.id;
+  state.authEmail = user.email || '';
   const meta = user.user_metadata || {};
 
   // Newer profiles carry department + title; select them but tolerate old schemas.
@@ -2207,6 +2266,63 @@ function confirmViewer() {
 
 function updateUserBadge() {
   document.getElementById('userBadgeText').textContent = state.currentUser || 'Set User';
+}
+
+// ============== MY PROFILE ==============
+function openProfile() {
+  if (!state.authUserId) return; // not signed in yet
+  const full = (state.currentUser || '').trim();
+  const sp = full.indexOf(' ');
+  document.getElementById('pf-first').value = sp === -1 ? full : full.slice(0, sp);
+  document.getElementById('pf-last').value = sp === -1 ? '' : full.slice(sp + 1).trim();
+  document.getElementById('pf-email').value = state.authEmail || '';
+  document.getElementById('pf-pw1').value = '';
+  document.getElementById('pf-pw2').value = '';
+  const role = [state.currentTitle, state.currentDept].filter(Boolean).join(' · ');
+  document.getElementById('profileRoleLine').textContent = role
+    ? `${role} — department and title are managed by an admin.`
+    : '';
+  document.getElementById('profileModal').classList.add('active');
+}
+
+function closeProfileModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('profileModal').classList.remove('active');
+}
+
+async function saveProfileName() {
+  const first = document.getElementById('pf-first').value.trim();
+  const last = document.getElementById('pf-last').value.trim();
+  const name = `${first} ${last}`.trim();
+  if (!name) { alert('Please enter your name.'); return; }
+  const { error } = await sbClient.from('profiles').update({ name }).eq('id', state.authUserId);
+  if (error) { showToast('Could not save name — try again'); console.error(error); return; }
+  // Keep the auth metadata name in sync too (best-effort)
+  try { await sbClient.auth.updateUser({ data: { name } }); } catch (e) { /* non-fatal */ }
+  state.currentUser = name;
+  updateUserBadge();
+  showToast('Name updated ✓');
+}
+
+async function changeProfileEmail() {
+  const email = document.getElementById('pf-email').value.trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('Please enter a valid email address.'); return; }
+  if (email.toLowerCase() === (state.authEmail || '').toLowerCase()) { showToast('That is already your email'); return; }
+  const { error } = await sbClient.auth.updateUser({ email });
+  if (error) { showToast('Email change failed — ' + (error.message || 'try again')); console.error(error); return; }
+  alert('Almost done!\n\nWe sent a confirmation link to ' + email + '. Your email changes only after you click that link (check your inbox, and possibly your old inbox too).');
+}
+
+async function changeProfilePassword() {
+  const pw1 = document.getElementById('pf-pw1').value;
+  const pw2 = document.getElementById('pf-pw2').value;
+  if (!pw1 || pw1.length < 6) { alert('Password must be at least 6 characters.'); return; }
+  if (pw1 !== pw2) { alert('The two passwords do not match.'); return; }
+  const { error } = await sbClient.auth.updateUser({ password: pw1 });
+  if (error) { showToast('Password change failed — ' + (error.message || 'try again')); console.error(error); return; }
+  document.getElementById('pf-pw1').value = '';
+  document.getElementById('pf-pw2').value = '';
+  showToast('Password changed ✓');
 }
 
 // ============== COMMISSION CALC ==============
