@@ -1525,7 +1525,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 13;
+const APP_VERSION = 14;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -1602,6 +1602,12 @@ const TITLES = ['Comfort Advisor', 'Technician', 'Admin', 'Manager'];
 function isCompanyWide() {
   return state.currentTitle === 'Admin' || state.currentRole === 'view';
 }
+// A job "belongs" to me if I own the record (stable across name changes) or it's
+// credited to my current name. owner_id survives profile renames; the name match
+// covers sales logged for me by a manager.
+function isMyJob(j) {
+  return (j.owner_id && j.owner_id === state.authUserId) || j.salesperson === state.currentUser;
+}
 function scopeJobsToUser(jobs) {
   const t = state.currentTitle;
   let out;
@@ -1610,7 +1616,7 @@ function scopeJobsToUser(jobs) {
     const dept = state.currentDept || '';
     out = jobs.filter(j => (j.department || '') === dept);                // own department
   } else {
-    out = jobs.filter(j => j.salesperson === state.currentUser);         // own sales only
+    out = jobs.filter(isMyJob);                                          // own sales only
   }
   // Company-wide viewers can narrow to a single department via the dashboard dropdown.
   if (isCompanyWide() && state.deptFilter && state.deptFilter !== 'all') {
@@ -2693,7 +2699,7 @@ function renderJobs() {
   let jobs = scopeJobsToUser([...state.jobs]);
 
   if (state.jobFilter === 'mine' && state.currentUser) {
-    jobs = jobs.filter(j => j.salesperson === state.currentUser);
+    jobs = jobs.filter(isMyJob);
   } else if (['Sold','Paid','Not Paid'].includes(state.jobFilter)) {
     jobs = jobs.filter(j => j.status === state.jobFilter);
   }
