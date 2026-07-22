@@ -1525,7 +1525,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 12;
+const APP_VERSION = 13;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -1702,9 +1702,19 @@ async function loadSettings() {
 }
 
 async function loadJobs() {
-  const { data, error } = await sbClient.from('jobs').select('*').order('created_at', { ascending: false });
-  if (error) { console.error('loadJobs', error); return; }
-  state.jobs = (data || []).map(rowToJob);
+  // Supabase caps a single select at ~1000 rows. Page through so older pay
+  // cycles aren't silently dropped once the company crosses 1000 sales.
+  const PAGE = 1000;
+  let all = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sbClient.from('jobs').select('*')
+      .order('created_at', { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) { console.error('loadJobs', error); break; }
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE) break; // last (short) page reached
+  }
+  state.jobs = all.map(rowToJob);
 }
 
 async function loadData(silent = false) {
