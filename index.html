@@ -1437,6 +1437,14 @@
       <button class="btn btn-primary btn-sm" onclick="saveProfileName()">Save Name</button>
     </div>
 
+    <!-- Merge older sales logged under a previous name -->
+    <div class="card" id="pf-merge-card" style="margin-bottom:14px; display:none;">
+      <div class="card-title">Older Sales Under a Different Name</div>
+      <div id="pf-merge-body" style="font-size:13px; color:var(--gray-700); margin-bottom:10px;"></div>
+      <div style="font-size:11px; color:var(--gray-500); margin-bottom:10px;">Only do this if those names are you — it re-labels your own sales to your current name.</div>
+      <button class="btn btn-secondary btn-sm" onclick="normalizeMySales()">Update them to my current name</button>
+    </div>
+
     <!-- Email -->
     <div class="card" style="margin-bottom:14px;">
       <div class="card-title">Email</div>
@@ -1525,7 +1533,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 14;
+const APP_VERSION = 15;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -2298,7 +2306,57 @@ function openProfile() {
   document.getElementById('profileRoleLine').textContent = role
     ? `${role} — department and title are managed by an admin.`
     : '';
+
+  // Offer to merge sales I own that are still under an older name into my current name.
+  const counts = myOtherNameCounts();
+  const card = document.getElementById('pf-merge-card');
+  const body = document.getElementById('pf-merge-body');
+  const names = Object.keys(counts);
+  if (names.length) {
+    const total = names.reduce((s, n) => s + counts[n], 0);
+    body.innerHTML = `You have <b>${total}</b> sale${total !== 1 ? 's' : ''} logged under: `
+      + names.map(n => `“${escapeHtml(n)}” (${counts[n]})`).join(', ') + '.';
+    card.style.display = '';
+  } else {
+    card.style.display = 'none';
+  }
+
   document.getElementById('profileModal').classList.add('active');
+}
+
+// Names on sales I OWN (owner_id === me) that differ from my current name -> counts
+function myOtherNameCounts() {
+  const counts = {};
+  const me = (state.currentUser || '').trim();
+  state.jobs.forEach(j => {
+    if (j.owner_id && j.owner_id === state.authUserId && j.salesperson && j.salesperson !== me) {
+      counts[j.salesperson] = (counts[j.salesperson] || 0) + 1;
+    }
+  });
+  return counts;
+}
+
+async function normalizeMySales() {
+  const name = (state.currentUser || '').trim();
+  if (!name) { alert('Set your name first.'); return; }
+  const counts = myOtherNameCounts();
+  const oldNames = Object.keys(counts);
+  if (!oldNames.length) { showToast('Nothing to update'); return; }
+  const total = oldNames.reduce((s, n) => s + counts[n], 0);
+  if (!confirm(`Re-label ${total} of your sales currently under "${oldNames.join('", "')}" to "${name}"?\n\nOnly do this if those names are you.`)) return;
+  // Scope each update to MY owned rows with that old name — never touches others' records.
+  for (const oldName of oldNames) {
+    const { error } = await sbClient.from('jobs').update({ salesperson: name })
+      .eq('owner_id', state.authUserId).eq('salesperson', oldName);
+    if (error) { showToast('Update failed — try again'); console.error(error); return; }
+  }
+  state.jobs.forEach(j => {
+    if (j.owner_id === state.authUserId && counts[j.salesperson]) j.salesperson = name;
+  });
+  renderJobs();
+  renderDashboard();
+  showToast(`Updated ${total} sale${total !== 1 ? 's' : ''} ✓`);
+  openProfile(); // refresh — the merge card will now hide
 }
 
 function closeProfileModal(e) {
@@ -2815,6 +2873,17 @@ async function setApproval(id, decision) {
   const j = state.jobs.find(x => x.id === id);
   if (!j) return;
   if (decision === 'rejected' && !confirm('Reject this sale? This is final — it will be locked and excluded from payroll. Only an Admin can reopen it.')) return;
+
+  // Approve/Reject also SAVES whatever the manager just typed (fees, price, etc.)
+  // so nothing is lost when the modal closes. If the form has a validation error,
+  // stop and let them fix it before the decision is applied.
+  const modal = document.getElementById('jobModal');
+  if (modal && modal.querySelector('.edit-field')) {
+    const updates = collectJobEdits(id);
+    if (!updates) return;
+    Object.assign(j, updates);
+  }
+
   j.approvalStatus = decision;
   if (decision === 'pending') { j.approvedBy = ''; j.approvedAt = ''; }
   else { j.approvedBy = state.currentUser || 'Unknown'; j.approvedAt = new Date().toISOString(); }
@@ -3191,12 +3260,16 @@ function removeEditItemRow(btn) {
   }
 }
 
-async function saveJobEdits(id) {
+// Gather every field from the open edit modal into an updates object.
+// Returns null (after alerting) if a required field is invalid, or {} if the
+// modal is showing the read-only view (no edit fields to collect).
+function collectJobEdits(id) {
   const j = state.jobs.find(x => x.id === id);
-  if (!j) return;
+  if (!j) return null;
 
   const modal = document.getElementById('jobModal');
   const fields = modal.querySelectorAll('.edit-field');
+  if (!fields.length) return {}; // read-only view — nothing to collect
   const updates = {};
 
   fields.forEach(f => {
@@ -3237,16 +3310,24 @@ async function saveJobEdits(id) {
     if (equipment) items.push({ equipment, brand: brand || '' });
   });
 
-  if (!updates.customer) { alert('Customer name required'); return; }
-  if (!updates.date) { alert('Date Sold is required'); return; }
-  if (!updates.dateInstalled) { alert('Date Installed is required'); return; }
-  if (!updates.price || updates.price <= 0) { alert('Valid sale price required'); return; }
-  if (!items.length) { alert('Add at least one equipment item'); return; }
+  if (!updates.customer) { alert('Customer name required'); return null; }
+  if (!updates.date) { alert('Date Sold is required'); return null; }
+  if (!updates.dateInstalled) { alert('Date Installed is required'); return null; }
+  if (!updates.price || updates.price <= 0) { alert('Valid sale price required'); return null; }
+  if (!items.length) { alert('Add at least one equipment item'); return null; }
 
   updates.items = items;
   updates.equipment = items[0].equipment;
   updates.brand = items[0].brand;
   updates.commissionOverride = true;
+  return updates;
+}
+
+async function saveJobEdits(id) {
+  const j = state.jobs.find(x => x.id === id);
+  if (!j) return;
+  const updates = collectJobEdits(id);
+  if (!updates) return; // validation failed
 
   Object.assign(j, updates);
   j.lastEditedAt = new Date().toISOString();
