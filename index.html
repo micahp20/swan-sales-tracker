@@ -1315,6 +1315,7 @@
     <div class="filter-row">
       <button class="filter-pill active" onclick="setJobFilter('all', this)">All Jobs</button>
       <button class="filter-pill" onclick="setJobFilter('mine', this)">My Jobs</button>
+      <button class="filter-pill" id="pill-pending" onclick="setJobFilter('pending', this)">Pending</button>
       <button class="filter-pill" onclick="setJobFilter('Sold', this)">Sold</button>
       <button class="filter-pill" onclick="setJobFilter('Paid', this)">Paid</button>
       <button class="filter-pill" onclick="setJobFilter('Not Paid', this)">Not Paid</button>
@@ -1533,7 +1534,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -2756,8 +2757,17 @@ function renderJobs() {
   // PRIVACY: advisors/techs see only their own; managers see their department; admins see all
   let jobs = scopeJobsToUser([...state.jobs]);
 
+  // Live "Pending" count on the filter pill so approvals aren't missed
+  const pill = document.getElementById('pill-pending');
+  if (pill) {
+    const pendingCount = jobs.filter(j => approvalOf(j) === 'pending').length;
+    pill.textContent = pendingCount ? `Pending (${pendingCount})` : 'Pending';
+  }
+
   if (state.jobFilter === 'mine' && state.currentUser) {
     jobs = jobs.filter(isMyJob);
+  } else if (state.jobFilter === 'pending') {
+    jobs = jobs.filter(j => approvalOf(j) === 'pending');
   } else if (['Sold','Paid','Not Paid'].includes(state.jobFilter)) {
     jobs = jobs.filter(j => j.status === state.jobFilter);
   }
@@ -2780,7 +2790,9 @@ function renderJobs() {
   if (!jobs.length) {
     const msg = q
       ? `No jobs match “${escapeHtml(state.jobSearch.trim())}”.`
-      : `No jobs yet. ${state.currentRole === 'view' ? 'Sales will show here as they come in.' : 'Tap "Add Sale" to log your first one.'}`;
+      : state.jobFilter === 'pending'
+        ? 'Nothing awaiting approval — you\'re all caught up. 🎉'
+        : `No jobs yet. ${state.currentRole === 'view' ? 'Sales will show here as they come in.' : 'Tap "Add Sale" to log your first one.'}`;
     list.innerHTML = `<div class="empty"><div class="empty-icon">📭</div>${msg}</div>`;
     return;
   }
