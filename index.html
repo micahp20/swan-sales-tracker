@@ -95,6 +95,7 @@
     font-size: 12px;
     font-weight: 600;
     transition: background 0.15s;
+    cursor: pointer;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -124,6 +125,7 @@
     flex-shrink: 0;
   }
   .signout-btn:hover { background: rgba(255,255,255,0.32); }
+  .header-user:hover { background: rgba(255,255,255,0.32); }
   .role-dot {
     width: 7px;
     height: 7px;
@@ -1128,9 +1130,10 @@
     <div class="header-title">Sales Tracker</div>
     <div class="header-subtitle">SWAN Plumbing, Heating &amp; Air</div>
   </div>
-  <div class="header-user" id="userBadge" onclick="openProfile()" style="cursor:pointer;" title="Edit my profile">
+  <div class="header-user" id="userBadge" onclick="openProfile()" style="cursor:pointer;" title="My Profile — edit name, email, password">
     <span class="role-dot" id="roleDot"></span>
     <span id="userBadgeText">…</span>
+    <span aria-hidden="true" style="opacity:0.9; font-size:12px;">✎</span>
   </div>
   <button class="signout-btn" id="signoutBtn" onclick="doLogout()">Sign out</button>
 </div>
@@ -1536,7 +1539,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 17;
+const APP_VERSION = 18;
 let updateAvailable = false;
 
 async function checkForUpdate() {
