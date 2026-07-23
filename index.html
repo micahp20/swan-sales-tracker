@@ -1539,7 +1539,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 18;
+const APP_VERSION = 19;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -2511,10 +2511,19 @@ function collectFees(cls, root) {
 // ============== ADD JOB ==============
 function renderSalespersonDropdown() {
   const sel = document.getElementById('f-salesperson');
-  // Managers/admins sell too — always let the logged-in person pick themselves,
-  // even if they haven't been added to the shared salespeople list.
+  if (!sel) return;
+  // Reps (Technicians / Comfort Advisors) always sell as themselves — lock the
+  // field to their own name so they don't pick from the team list or see seed names.
+  if (state.currentRole === 'rep') {
+    sel.innerHTML = `<option value="${escapeHtml(state.currentUser || '')}" selected>${escapeHtml(state.currentUser || '')}</option>`;
+    sel.disabled = true;
+    return;
+  }
+  // Managers/admins sell too and can log for anyone — always let the logged-in
+  // person pick themselves, even if they aren't in the shared salespeople list.
   const names = [...state.salespeople];
   if (state.currentUser && !names.includes(state.currentUser)) names.unshift(state.currentUser);
+  sel.disabled = false;
   sel.innerHTML = names.map(n =>
     `<option value="${escapeHtml(n)}" ${n === state.currentUser ? 'selected' : ''}>${escapeHtml(n)}</option>`
   ).join('');
