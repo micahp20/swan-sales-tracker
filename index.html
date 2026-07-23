@@ -1539,7 +1539,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 19;
+const APP_VERSION = 20;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -1582,7 +1582,7 @@ document.getElementById('headerLogo').src = 'data:image/webp;base64,' + LOGO_B64
 // ============== STATE ==============
 let state = {
   jobs: [],
-  salespeople: ['MVP'],
+  salespeople: [],
   equipment: ['Full System', 'AC', 'Furnace', 'Heat Pump', 'Water Heater', 'Attic Insulation', 'Thermostat', 'Filter', 'Electrical', 'Other'],
   brands: ['— None —', 'Carrier', 'Lennox', 'Trane', 'Goodman', 'Rheem', 'York', 'American Standard', 'Bryant', 'Other'],
   tiers: [
@@ -1717,7 +1717,15 @@ function jobToRow(j) {
 async function loadSettings() {
   const { data, error } = await sbClient.from('settings').select('*').eq('id', 1).single();
   if (error || !data) return;
-  if (data.salespeople) state.salespeople = data.salespeople;
+  if (data.salespeople) {
+    // Drop the leftover "MVP" seed and any blank entries so the picker only shows
+    // real salespeople. Persist the tidy list once (admins can write settings).
+    const cleaned = data.salespeople.filter(n => n && n.trim() && n !== 'MVP');
+    state.salespeople = cleaned;
+    if (cleaned.length !== data.salespeople.length && state.currentTitle === 'Admin') {
+      try { await sbClient.from('settings').update({ salespeople: cleaned }).eq('id', 1); } catch (e) { /* RLS may block */ }
+    }
+  }
   if (data.equipment)   state.equipment   = data.equipment;
   if (data.brands)      state.brands      = data.brands;
   if (data.tiers)       state.tiers       = data.tiers;
