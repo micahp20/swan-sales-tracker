@@ -1474,6 +1474,8 @@
       </div>
       <button class="btn btn-primary btn-sm" onclick="changeProfilePassword()">Change Password</button>
     </div>
+
+    <div style="text-align:center; font-size:11px; color:var(--gray-400); margin-top:14px;">App build <span id="pf-version">—</span></div>
   </div>
 </div>
 
@@ -1534,7 +1536,7 @@ const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-R
 // This number is bumped every time a new build is deployed. The app fetches
 // version.json (deployed alongside this file) and, if the deployed number is
 // higher than APP_VERSION baked in here, shows the "update available" banner.
-const APP_VERSION = 16;
+const APP_VERSION = 17;
 let updateAvailable = false;
 
 async function checkForUpdate() {
@@ -1555,8 +1557,10 @@ async function checkForUpdate() {
 }
 
 function applyUpdate() {
-  // Reload from the network, bypassing the cached copy
-  location.reload();
+  // A plain location.reload() can serve the CACHED index.html (common on iPad
+  // Safari), so the user never actually gets the new build. Navigate to a
+  // cache-busted URL so the freshly deployed HTML is fetched from the network.
+  location.replace(location.origin + location.pathname + '?v=' + Date.now());
 }
 
 function startUpdateWatcher() {
@@ -2303,6 +2307,7 @@ function openProfile() {
   document.getElementById('pf-email').value = state.authEmail || '';
   document.getElementById('pf-pw1').value = '';
   document.getElementById('pf-pw2').value = '';
+  document.getElementById('pf-version').textContent = APP_VERSION;
   const role = [state.currentTitle, state.currentDept].filter(Boolean).join(' · ');
   document.getElementById('profileRoleLine').textContent = role
     ? `${role} — department and title are managed by an admin.`
