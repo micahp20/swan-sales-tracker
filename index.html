@@ -292,8 +292,8 @@
     gap: 10px;
     margin-bottom: 16px;
   }
-  @media(min-width: 600px) {
-    .stat-grid { grid-template-columns: repeat(3, 1fr); }
+  @media(min-width: 760px) {
+    .stat-grid { grid-template-columns: repeat(4, 1fr); }
   }
   .stat {
     background: white;
@@ -323,6 +323,7 @@
   }
   .stat-accent { color: var(--royal); }
   .stat-green { color: var(--green); }
+  .stat-amber { color: var(--amber); }
 
   /* FORM */
   .form-group { margin-bottom: 14px; }
@@ -687,6 +688,45 @@
   .leader-count {
     font-size: 11px;
     color: var(--gray-500);
+  }
+  .leader-rank {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--royal-pale);
+    color: var(--royal-dark);
+    font-size: 11px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .leader-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--gray-900);
+  }
+  .chart-svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+  .chart-bar { fill: var(--royal); }
+  .chart-bar:hover { fill: var(--royal-light); }
+  .chart-grid { stroke: var(--gray-200); stroke-width: 1; }
+  .chart-axis { fill: var(--gray-500); font-size: 11px; }
+  .chart-empty {
+    font-size: 13px;
+    color: var(--gray-500);
+    padding: 16px 0 8px;
+    text-align: center;
+  }
+  .section-hint {
+    font-size: 12px;
+    color: var(--gray-500);
+    margin: -2px 0 6px;
   }
 
   /* SETTINGS */
@@ -1141,6 +1181,9 @@
 <div class="view-only-banner" id="viewOnlyBanner" style="display:none;">
   👁️ View-only mode — you can see all sales but can't make changes
 </div>
+<div class="view-only-banner" id="prototypeBanner" style="display:none; background:var(--royal-pale); color:var(--royal-dark); border-bottom-color:#C5D7F5;">
+  Local preview — fictional sample sales only. Nothing is saved or sent to the live tracker.
+</div>
 
 <div class="sync-indicator" id="syncIndicator">Syncing…</div>
 
@@ -1149,7 +1192,7 @@
   <!-- DASHBOARD -->
   <div class="screen active" id="screen-dashboard">
     <div class="filter-row" style="align-items:center; gap:8px; margin-bottom:6px;">
-      <select id="filterMode" class="month-picker" onchange="setFilterMode(this.value)" style="flex:0 0 auto;">
+      <select id="filterMode" class="month-picker" onchange="setFilterMode(this.value)" style="flex:0 0 auto; width:auto;">
         <option value="cycle">Pay Cycle</option>
         <option value="month">Month</option>
         <option value="year">Year</option>
@@ -1173,15 +1216,40 @@
         <div class="stat-sub" id="statCount">0 jobs</div>
       </div>
       <div class="stat">
-        <div class="stat-label" id="commissionLabel">My Commission</div>
+        <div class="stat-label" id="commissionLabel">Approved Commission</div>
         <div class="stat-value stat-green" id="statCommission">$0</div>
-        <div class="stat-sub" id="commissionSub">Approved</div>
+        <div class="stat-sub" id="commissionSub">Payroll</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label" id="pendingLabel">Pending Commission</div>
+        <div class="stat-value stat-amber" id="statPending">$0</div>
+        <div class="stat-sub" id="pendingSub">Awaiting approval</div>
       </div>
       <div class="stat">
         <div class="stat-label">Avg Ticket</div>
         <div class="stat-value" id="statAvg">$0</div>
         <div class="stat-sub">Per job</div>
       </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+        <span>Sales Over Time</span>
+        <span id="chartCaption" style="text-transform:none; letter-spacing:0; font-weight:700; color:var(--gray-700);"></span>
+      </div>
+      <div id="salesChart"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Rep Leaderboard</div>
+      <div class="section-hint">Sales, jobs, and commission for the selected period.</div>
+      <div id="leaderboard"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">By Department</div>
+      <div class="section-hint">Sales, jobs, and commission in each department.</div>
+      <div id="deptBreakdown"></div>
     </div>
 
     <div class="card">
@@ -1532,7 +1600,14 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // 👆 Get both from your Supabase project: Settings → API Keys (Publishable key)
 //    and Settings → API (Project URL). Both are safe to keep in this file.
 
-const sbClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
+// Local preview only (open the file or localhost). The deployed site is unchanged.
+// Sample sales stay in memory — the Supabase client is not created, so nothing
+// is read from or written to the live database.
+const LOCAL_PROTOTYPE = ['localhost', '127.0.0.1', '::1', ''].includes(
+  (typeof location !== 'undefined' && location.hostname) || ''
+);
+
+const sbClient = (!LOCAL_PROTOTYPE && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 const SUPABASE_CONFIGURED = !!sbClient && !SUPABASE_URL.includes('YOUR-PROJECT-REF') && !SUPABASE_KEY.includes('PASTE_YOUR_KEY');
 
 // ============== APP VERSION / UPDATE CHECK ==============
@@ -1715,6 +1790,7 @@ function jobToRow(j) {
 }
 
 async function loadSettings() {
+  if (LOCAL_PROTOTYPE || !sbClient) return;
   const { data, error } = await sbClient.from('settings').select('*').eq('id', 1).single();
   if (error || !data) return;
   if (data.salespeople) {
@@ -1732,6 +1808,7 @@ async function loadSettings() {
 }
 
 async function loadJobs() {
+  if (LOCAL_PROTOTYPE || !sbClient) return;
   // Supabase caps a single select at ~1000 rows. Page through so older pay
   // cycles aren't silently dropped once the company crosses 1000 sales.
   const PAGE = 1000;
@@ -1761,6 +1838,7 @@ async function loadData(silent = false) {
 
 // Settings are one shared row; only managers can write it (enforced by the DB).
 async function saveData() {
+  if (LOCAL_PROTOTYPE || !sbClient) { showToast('Sample preview — not saved'); return; }
   const { error } = await sbClient.from('settings').update({
     salespeople: state.salespeople,
     equipment: state.equipment,
@@ -1787,6 +1865,9 @@ function stripOptionalColumns(row) {
 }
 
 async function dbInsertJob(job) {
+  if (LOCAL_PROTOTYPE || !sbClient) {
+    return Object.assign({}, job, { id: job.id || ('local-' + Date.now().toString(36)) });
+  }
   let { data, error } = await sbClient.from('jobs').insert(jobToRow(job)).select().single();
   if (error && isMissingColumnError(error)) {
     console.warn('jobs table missing payment/fees columns — run the migration. Saving without them for now.');
@@ -1796,6 +1877,7 @@ async function dbInsertJob(job) {
   return rowToJob(data);
 }
 async function dbUpdateJob(id, jobLike) {
+  if (LOCAL_PROTOTYPE || !sbClient) return true;
   let { error } = await sbClient.from('jobs').update(jobToRow(jobLike)).eq('id', id);
   if (error && isMissingColumnError(error)) {
     console.warn('jobs table missing payment/fees columns — run the migration. Saving without them for now.');
@@ -1805,11 +1887,13 @@ async function dbUpdateJob(id, jobLike) {
   return true;
 }
 async function dbDeleteJob(id) {
+  if (LOCAL_PROTOTYPE || !sbClient) return true;
   const { error } = await sbClient.from('jobs').delete().eq('id', id);
   if (error) { showToast('Delete failed — try again'); console.error(error); return false; }
   return true;
 }
 async function dbDeleteAllJobs() {
+  if (LOCAL_PROTOTYPE || !sbClient) return true;
   const { error } = await sbClient.from('jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
   if (error) { showToast('Clear failed — try again'); console.error(error); return false; }
   return true;
@@ -1817,6 +1901,7 @@ async function dbDeleteAllJobs() {
 
 // ============== AUTH ==============
 async function loadProfile() {
+  if (LOCAL_PROTOTYPE || !sbClient) return false;
   const { data: { user } } = await sbClient.auth.getUser();
   if (!user) return false;
   state.authUserId = user.id;
@@ -1931,6 +2016,11 @@ async function doSignup() {
   const btn = document.getElementById('login-btn');
   errEl.style.display = 'none';
   okEl.style.display = 'none';
+  if (LOCAL_PROTOTYPE) {
+    errEl.textContent = 'This local preview uses sample data. Sign in with any email and password.';
+    errEl.style.display = 'block';
+    return;
+  }
   if (!SUPABASE_CONFIGURED) {
     errEl.textContent = 'This app has not been connected to Supabase yet (the keys at the top of the file are still placeholders).';
     errEl.style.display = 'block';
@@ -1979,6 +2069,85 @@ async function doSignup() {
   toggleAuthMode();
 }
 
+// Fictional local-preview sales. Names and customers are made up.
+// Kept in memory only — never sent to Supabase.
+function buildPrototypeJobs() {
+  const sample = [
+    ['p1',  '2026-10-26', 'Priya Shah',    'HVAC',         21500, 10, 'Sold',     'pending'],
+    ['p2',  '2026-10-27', 'Jordan Hale',   'HVAC',         14800,  8, 'Sold',     'approved'],
+    ['p3',  '2026-10-27', 'Riley Brooks',  'Plumbing',      4200,  6, 'Not Paid', 'approved'],
+    ['p4',  '2026-10-28', 'Jordan Hale',   'HVAC',          9200,  6, 'Sold',     'pending'],
+    ['p5',  '2026-10-28', 'Sam Okonkwo',   'Electrical',   11750,  8, 'Sold',     'pending'],
+    ['p6',  '2026-10-29', 'Chris Nguyen',  'Plumbing',      6400,  6, 'Paid',     'approved'],
+    ['p7',  '2026-10-02', 'Jordan Hale',   'HVAC',         18600,  8, 'Paid',     'approved'],
+    ['p8',  '2026-10-05', 'Priya Shah',    'HVAC',          7400,  6, 'Sold',     'approved'],
+    ['p9',  '2026-10-08', 'Chris Nguyen',  'Plumbing',     13200,  8, 'Sold',     'pending'],
+    ['p10', '2026-10-09', 'Sam Okonkwo',   'Electrical',    3000,  6, 'Sold',     'rejected'],
+    ['p11', '2026-10-12', 'Sam Okonkwo',   'Electrical',    5600,  6, 'Paid',     'approved'],
+    ['p12', '2026-10-15', 'Avery Quinn',   'Office Staff',  1800,  6, 'Sold',     'approved'],
+    ['p13', '2026-10-19', 'Riley Brooks',  'Plumbing',      9800,  6, 'Sold',     'approved'],
+    ['p14', '2026-10-22', 'Jordan Hale',   'HVAC',         16200,  8, 'Sold',     'pending'],
+    ['p15', '2026-09-04', 'Chris Nguyen',  'Plumbing',      8900,  6, 'Sold',     'approved'],
+    ['p16', '2026-09-18', 'Priya Shah',    'HVAC',         15400,  8, 'Paid',     'approved']
+  ];
+  return sample.map((row, i) => {
+    const [id, date, salesperson, department, price, rate, status, approval] = row;
+    return {
+      id,
+      owner_id: 'local-prototype-owner',
+      customer: 'Sample customer ' + (i + 1),
+      jobNumber: 'SAMPLE-' + (1001 + i),
+      date,
+      dateInstalled: date,
+      salesperson,
+      equipment: 'Full System',
+      brand: 'Sample',
+      items: [{ equipment: 'Full System', brand: 'Sample' }],
+      status,
+      price,
+      commission: Math.round(price * rate) / 100,
+      commissionRate: rate,
+      paymentMethods: [],
+      fees: {},
+      department,
+      payPeriodStart: '',
+      managerNotes: '',
+      salesNotes: '',
+      flip: false,
+      flipDetail: '',
+      approvalStatus: approval,
+      approvedBy: approval === 'pending' ? '' : 'Sample Manager',
+      approvedAt: approval === 'pending' ? '' : date + 'T15:00:00.000Z',
+      createdAt: date + 'T15:00:00.000Z',
+      createdBy: salesperson,
+      lastEditedAt: date + 'T15:00:00.000Z',
+      lastEditedBy: 'Sample Manager'
+    };
+  });
+}
+
+function startLocalPrototype() {
+  state.jobs = buildPrototypeJobs();
+  state.salespeople = ['Jordan Hale', 'Priya Shah', 'Chris Nguyen', 'Riley Brooks', 'Sam Okonkwo', 'Avery Quinn'];
+  state.currentUser = 'Alex Rivera';
+  state.currentTitle = 'Admin';
+  state.currentRole = 'gm';
+  state.currentDept = 'Office Staff';
+  state.authUserId = 'local-prototype';
+  state.authEmail = 'alex.rivera@example.com';
+  state.deptFilter = 'all';
+  state.filterMode = 'cycle';
+  state.dashPeriod = null;
+  state.filterMonth = null;
+  state.filterYear = null;
+  updateUserBadge();
+  applyRolePermissions();
+  const banner = document.getElementById('prototypeBanner');
+  if (banner) banner.style.display = 'block';
+  renderDashboard();
+  document.getElementById('loginOverlay').style.display = 'none';
+}
+
 async function doLogin() {
   const email = document.getElementById('login-email').value.trim();
   const password = document.getElementById('login-password').value;
@@ -1987,13 +2156,18 @@ async function doLogin() {
   errEl.style.display = 'none';
   const okEl = document.getElementById('login-success');
   if (okEl) okEl.style.display = 'none';
-  if (!SUPABASE_CONFIGURED) {
-    errEl.textContent = 'This app has not been connected to Supabase yet (the keys at the top of the file are still placeholders).';
+  if (!email || !password) {
+    errEl.textContent = 'Enter your email and password.';
     errEl.style.display = 'block';
     return;
   }
-  if (!email || !password) {
-    errEl.textContent = 'Enter your email and password.';
+  if (LOCAL_PROTOTYPE) {
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    startLocalPrototype();
+    return;
+  }
+  if (!SUPABASE_CONFIGURED) {
+    errEl.textContent = 'This app has not been connected to Supabase yet (the keys at the top of the file are still placeholders).';
     errEl.style.display = 'block';
     return;
   }
@@ -2022,6 +2196,10 @@ async function doForgotPassword(e) {
   const errEl = document.getElementById('login-error');
   const okEl = document.getElementById('login-success');
   errEl.style.display = 'none'; okEl.style.display = 'none';
+  if (LOCAL_PROTOTYPE) {
+    errEl.textContent = 'Password reset is turned off in the local preview.';
+    errEl.style.display = 'block'; return;
+  }
   if (!SUPABASE_CONFIGURED) {
     errEl.textContent = 'This app has not been connected to Supabase yet.';
     errEl.style.display = 'block'; return;
@@ -2063,6 +2241,10 @@ async function doSetNewPassword() {
     errEl.textContent = 'Password must be at least 6 characters.';
     errEl.style.display = 'block'; return;
   }
+  if (LOCAL_PROTOTYPE) {
+    errEl.textContent = 'Password changes are turned off in the local preview.';
+    errEl.style.display = 'block'; return;
+  }
   const { error } = await sbClient.auth.updateUser({ password: pw });
   if (error) {
     errEl.textContent = error.message || 'Could not update password.';
@@ -2090,6 +2272,7 @@ function saveCurrentRole(role) {
 // ============== REAL-TIME SYNC ==============
 let syncTimer = null;
 function startSync() {
+  if (LOCAL_PROTOTYPE || !sbClient) return;
   if (syncTimer) clearInterval(syncTimer);
   syncTimer = setInterval(async () => {
     // Don't sync if a modal is open with active editing
@@ -2356,6 +2539,7 @@ function myOtherNameCounts() {
 async function normalizeMySales() {
   const name = (state.currentUser || '').trim();
   if (!name) { alert('Set your name first.'); return; }
+  if (LOCAL_PROTOTYPE) { showToast('Sample preview — not saved'); return; }
   const counts = myOtherNameCounts();
   const oldNames = Object.keys(counts);
   if (!oldNames.length) { showToast('Nothing to update'); return; }
@@ -2388,6 +2572,12 @@ async function saveProfileName() {
   if (!name) { alert('Please enter your name.'); return; }
   const oldName = (state.currentUser || '').trim();
   if (name === oldName) { showToast('That is already your name'); return; }
+  if (LOCAL_PROTOTYPE) {
+    state.currentUser = name;
+    updateUserBadge();
+    showToast('Sample preview — name updated on this page only');
+    return;
+  }
 
   const { error } = await sbClient.from('profiles').update({ name }).eq('id', state.authUserId);
   if (error) { showToast('Could not save name — try again'); console.error(error); return; }
@@ -2424,6 +2614,7 @@ async function changeProfileEmail() {
   const email = document.getElementById('pf-email').value.trim();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert('Please enter a valid email address.'); return; }
   if (email.toLowerCase() === (state.authEmail || '').toLowerCase()) { showToast('That is already your email'); return; }
+  if (LOCAL_PROTOTYPE) { showToast('Sample preview — not saved'); return; }
   const { error } = await sbClient.auth.updateUser({ email });
   if (error) { showToast('Email change failed — ' + (error.message || 'try again')); console.error(error); return; }
   alert('Almost done!\n\nWe sent a confirmation link to ' + email + '. Your email changes only after you click that link (check your inbox, and possibly your old inbox too).');
@@ -2434,6 +2625,7 @@ async function changeProfilePassword() {
   const pw2 = document.getElementById('pf-pw2').value;
   if (!pw1 || pw1.length < 6) { alert('Password must be at least 6 characters.'); return; }
   if (pw1 !== pw2) { alert('The two passwords do not match.'); return; }
+  if (LOCAL_PROTOTYPE) { showToast('Sample preview — not saved'); return; }
   const { error } = await sbClient.auth.updateUser({ password: pw1 });
   if (error) { showToast('Password change failed — ' + (error.message || 'try again')); console.error(error); return; }
   document.getElementById('pf-pw1').value = '';
@@ -3719,31 +3911,287 @@ function populateDeptFilter() {
   });
 }
 
+// Approved commission is payable. Pending is still waiting on a manager.
+// Rejected is in neither bucket.
+function commissionSplit(jobs) {
+  let approved = 0, pending = 0;
+  jobs.forEach(j => {
+    const c = j.commission || 0;
+    const a = approvalOf(j);
+    if (a === 'approved') approved += c;
+    else if (a === 'pending') pending += c;
+  });
+  return { approved, pending, total: approved + pending };
+}
+
+function sumPrices(jobs) {
+  return jobs.reduce((s, j) => s + (j.price || 0), 0);
+}
+
+function jobCountLabel(n) {
+  return n + ' job' + (n === 1 ? '' : 's');
+}
+
+// Right-hand line for leaderboard and department rows.
+function metricSub(jobs) {
+  const split = commissionSplit(jobs);
+  let comm = '$' + formatNum(split.total) + ' commission';
+  if (split.pending && split.approved) {
+    comm += ' · <span class="stat-amber">$' + formatNum(split.pending) + ' pending</span>';
+  } else if (split.pending) {
+    comm += ' · <span class="stat-amber">awaiting approval</span>';
+  }
+  return jobCountLabel(jobs.length) + ' · ' + comm;
+}
+
+function groupJobs(jobs, keyFn) {
+  const map = new Map();
+  jobs.forEach(j => {
+    const key = keyFn(j) || 'Unassigned';
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(j);
+  });
+  return map;
+}
+
+function deptsOf(jobs) {
+  const seen = [];
+  jobs.forEach(j => {
+    const d = j.department || 'Unassigned';
+    if (!seen.includes(d)) seen.push(d);
+  });
+  return seen.join(', ');
+}
+
+// One bar per day (pay cycle or month) or per month (year, YTD, all time).
+function salesBuckets(jobs) {
+  const mode = state.filterMode || 'cycle';
+  const monthAll = mode === 'month' && state.filterMonth === 'all';
+  const yearAll = mode === 'year' && state.filterYear === 'all';
+  const cycleAll = mode === 'cycle' && selectedPeriod() === 'all';
+  if (mode === 'ytd' || mode === 'year' || monthAll || yearAll || cycleAll) {
+    return monthSalesBuckets(jobs, mode, monthAll || yearAll || cycleAll);
+  }
+  if (mode === 'month') return daySalesBuckets(jobs, state.filterMonth || curMonthStr());
+  return cycleSalesBuckets(jobs, selectedPeriod());
+}
+
+function monthSalesBuckets(jobs, mode, allTime) {
+  let keys;
+  if (allTime) {
+    const set = new Set();
+    jobs.forEach(j => { if (j.date) set.add(String(j.date).slice(0, 7)); });
+    keys = Array.from(set).sort();
+    if (!keys.length) keys = [curMonthStr()];
+  } else if (mode === 'ytd') {
+    const last = parseInt(curMonthStr().slice(5), 10);
+    const y = curYearStr();
+    keys = [];
+    for (let m = 1; m <= last; m++) keys.push(y + '-' + String(m).padStart(2, '0'));
+  } else {
+    const y = String(state.filterYear || curYearStr());
+    keys = [];
+    for (let m = 1; m <= 12; m++) keys.push(y + '-' + String(m).padStart(2, '0'));
+  }
+  const map = new Map();
+  jobs.forEach(j => {
+    const k = String(j.date || '').slice(0, 7);
+    if (!k || k.length < 7) return;
+    map.set(k, (map.get(k) || 0) + (j.price || 0));
+  });
+  return keys.map(k => ({
+    label: PP_MONTHS[(parseInt(k.slice(5), 10) || 1) - 1] || k,
+    value: map.get(k) || 0
+  }));
+}
+
+function daySalesBuckets(jobs, ym) {
+  const parts = String(ym).split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate() || 30;
+  const map = new Map();
+  jobs.forEach(j => {
+    const d = String(j.date || '');
+    if (d.slice(0, 7) !== ym) return;
+    const dd = d.slice(8, 10);
+    map.set(dd, (map.get(dd) || 0) + (j.price || 0));
+  });
+  const out = [];
+  for (let day = 1; day <= days; day++) {
+    const dd = String(day).padStart(2, '0');
+    out.push({ label: String(day), value: map.get(dd) || 0 });
+  }
+  return out;
+}
+
+function cycleSalesBuckets(jobs, start) {
+  const end = ppEndForStart(start);
+  const map = new Map();
+  for (let i = 0; i < PP_LEN; i++) map.set(ppFromUTC(ppDateToUTC(start) + i * PP_DAY), 0);
+  jobs.forEach(j => {
+    const d = String(j.date || '').slice(0, 10);
+    const key = (d && d >= start && d <= end) ? d : start;
+    map.set(key, (map.get(key) || 0) + (j.price || 0));
+  });
+  return Array.from(map.entries()).map(([k, value]) => ({
+    label: String(parseInt(k.slice(8), 10)),
+    value
+  }));
+}
+
+function niceMax(max) {
+  if (max <= 0) return 1;
+  const rough = max * 1.08;
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  const candidates = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  for (let i = 0; i < candidates.length; i++) {
+    const v = candidates[i] * pow;
+    if (v >= rough) return v;
+  }
+  return 10 * pow;
+}
+
+function formatAxis(n) {
+  if (n >= 1000) {
+    const k = n / 1000;
+    const whole = Math.abs(k - Math.round(k)) < 0.05;
+    return '$' + (whole ? String(Math.round(k)) : String(Math.round(k * 10) / 10)) + 'k';
+  }
+  return '$' + Math.round(n);
+}
+
+function salesChartSvg(buckets) {
+  const w = 640, h = 156;
+  const padL = 48, padR = 8, padT = 14, padB = 24;
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const max = Math.max.apply(null, buckets.map(b => b.value).concat(0));
+  const yMax = niceMax(max);
+  const n = buckets.length || 1;
+  const gap = n > 20 ? 2 : 4;
+  const barW = Math.max(1, (innerW - gap * (n - 1)) / n);
+  const step = n > 20 ? 5 : 1;
+  const ticks = [yMax, yMax / 2, 0].map(v => {
+    const y = padT + innerH - (v / yMax) * innerH;
+    return `<line class="chart-grid" x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}"/>` +
+      `<text class="chart-axis" x="${padL - 6}" y="${y}" text-anchor="end" dominant-baseline="middle">${formatAxis(max > 0 ? v : 0)}</text>`;
+  }).join('');
+  const bars = buckets.map((b, i) => {
+    const bh = max > 0 ? (b.value / yMax) * innerH : 0;
+    const x = padL + i * (barW + gap);
+    const y = padT + innerH - bh;
+    const hBar = b.value > 0 ? Math.max(bh, 2) : 0;
+    const showLabel = (i % step === 0) || i === n - 1;
+    const label = showLabel
+      ? `<text class="chart-axis" x="${x + barW / 2}" y="${h - 6}" text-anchor="middle">${b.label}</text>`
+      : '';
+    const title = b.label + ': $' + formatNum(b.value);
+    return `<rect class="chart-bar" x="${x}" y="${y}" width="${barW}" height="${hBar}" rx="2"><title>${escapeHtml(title)}</title></rect>${label}`;
+  }).join('');
+  return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Sales over time for ${escapeHtml(activeFilterLabel())}">${ticks}${bars}</svg>`;
+}
+
+function renderSalesChart(jobs) {
+  const cap = document.getElementById('chartCaption');
+  if (cap) cap.textContent = activeFilterLabel();
+  const el = document.getElementById('salesChart');
+  if (!el) return;
+  const buckets = salesBuckets(jobs);
+  const total = buckets.reduce((s, b) => s + b.value, 0);
+  el.innerHTML = (!jobs.length || total <= 0)
+    ? '<div class="chart-empty">No sales in this period.</div>'
+    : salesChartSvg(buckets);
+}
+
+function renderLeaderboard(jobs) {
+  const el = document.getElementById('leaderboard');
+  if (!el) return;
+  if (!jobs.length) {
+    el.innerHTML = '<div class="chart-empty">No sales in this period.</div>';
+    return;
+  }
+  const rows = Array.from(groupJobs(jobs, j => j.salesperson || 'Unassigned').entries())
+    .map(([name, list]) => ({ name, list, sales: sumPrices(list) }))
+    .sort((a, b) => b.sales - a.sales || a.name.localeCompare(b.name));
+  el.innerHTML = rows.map((row, i) => `
+    <div class="leader-row">
+      <div class="leader-rank">${i + 1}</div>
+      <div style="flex:1; min-width:0;">
+        <div class="leader-name">${escapeHtml(row.name)}</div>
+        <div class="leader-count">${escapeHtml(deptsOf(row.list))}</div>
+      </div>
+      <div class="leader-stats" style="max-width:62%;">
+        <div class="leader-total">$${formatNum(row.sales)}</div>
+        <div class="leader-count">${metricSub(row.list)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderDeptBreakdown(jobs) {
+  const el = document.getElementById('deptBreakdown');
+  if (!el) return;
+  if (!jobs.length) {
+    el.innerHTML = '<div class="chart-empty">No sales in this period.</div>';
+    return;
+  }
+  const rows = Array.from(groupJobs(jobs, j => j.department || 'Unassigned').entries())
+    .map(([name, list]) => ({ name, list, sales: sumPrices(list) }))
+    .sort((a, b) => b.sales - a.sales || a.name.localeCompare(b.name));
+  el.innerHTML = rows.map(row => `
+    <div class="leader-row">
+      <div style="flex:1; min-width:0;">
+        <span class="badge badge-dept">${escapeHtml(row.name)}</span>
+      </div>
+      <div class="leader-stats" style="max-width:68%;">
+        <div class="leader-total">$${formatNum(row.sales)}</div>
+        <div class="leader-count">${metricSub(row.list)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
 function renderDashboard() {
   populatePeriodPicker();
   // PRIVACY: advisors/techs see only their own; managers see their department; admins see all
   let filtered = scopeJobsToUser(filterByPeriod(state.jobs));
 
-  const total = filtered.reduce((s, j) => s + (j.price || 0), 0);
+  const total = sumPrices(filtered);
   const count = filtered.length;
   const avg = count > 0 ? total / count : 0;
 
-  // Commission across the jobs you can see. Reps are already filtered to their own
-  // jobs (so this is "My Commission"); managers/viewers see the whole team's payout.
-  // Only APPROVED sales count toward payout — pending/rejected are excluded.
-  const commission = filtered.reduce((s, j) => s + (isPayable(j) ? (j.commission || 0) : 0), 0);
-  const pending = filtered.filter(j => approvalOf(j) === 'pending');
-  const pendingComm = pending.reduce((s, j) => s + (j.commission || 0), 0);
+  // Reps are already filtered to their own jobs. Managers and admins see the team.
+  // Approved commission is the payroll number. Pending is its own card so a $0
+  // approved total can't hide sales that are still waiting on approval.
+  const split = commissionSplit(filtered);
+  const pendingJobs = filtered.filter(j => approvalOf(j) === 'pending');
+  const approvedJobs = filtered.filter(isPayable);
   const isRep = state.currentRole === 'rep';
+  const pendingSales = sumPrices(pendingJobs);
 
   document.getElementById('statTotal').textContent = '$' + formatNum(total);
-  document.getElementById('statCount').textContent = count + ' job' + (count !== 1 ? 's' : '');
-  document.getElementById('commissionLabel').textContent = isRep ? 'My Commission' : 'Team Commission';
-  document.getElementById('statCommission').textContent = '$' + formatNum(commission);
-  document.getElementById('commissionSub').textContent = pending.length
-    ? `Approved · ${pending.length} pending ($${formatNum(pendingComm)})`
-    : 'Approved';
+  document.getElementById('statCount').textContent = jobCountLabel(count);
+  document.getElementById('commissionLabel').textContent = isRep ? 'My Approved' : 'Approved Commission';
+  document.getElementById('statCommission').textContent = '$' + formatNum(split.approved);
+  document.getElementById('commissionSub').textContent = approvedJobs.length
+    ? jobCountLabel(approvedJobs.length) + ' · payroll'
+    : 'None approved yet';
+  const pendingLabel = document.getElementById('pendingLabel');
+  if (pendingLabel) pendingLabel.textContent = isRep ? 'My Pending' : 'Pending Commission';
+  const pendingValue = document.getElementById('statPending');
+  if (pendingValue) pendingValue.textContent = '$' + formatNum(split.pending);
+  const pendingSub = document.getElementById('pendingSub');
+  if (pendingSub) {
+    pendingSub.textContent = pendingJobs.length
+      ? jobCountLabel(pendingJobs.length) + ' · $' + formatNum(pendingSales) + ' sales'
+      : 'None waiting';
+  }
   document.getElementById('statAvg').textContent = '$' + formatNum(avg);
+
+  renderSalesChart(filtered);
+  renderLeaderboard(filtered);
+  renderDeptBreakdown(filtered);
 
   // Pipeline
   const statuses = ['Sold', 'Paid', 'Not Paid'];
@@ -3758,7 +4206,7 @@ function renderDashboard() {
         </div>
         <div class="leader-stats">
           <div class="leader-total">$${formatNum(sTotal)}</div>
-          <div class="leader-count">${items.length} job${items.length !== 1 ? 's' : ''}</div>
+          <div class="leader-count">${jobCountLabel(items.length)}</div>
         </div>
       </div>
     `;
@@ -3778,6 +4226,11 @@ function renderSettings() {
 async function renderTeamList() {
   const el = document.getElementById('team-list');
   if (!el) return;
+  if (LOCAL_PROTOTYPE || !sbClient) {
+    el.innerHTML = `<div style="font-size:13px; color:var(--gray-500); padding:8px 0;">Sample team for the local preview. Profiles are not loaded from the live tracker.</div>`
+      + state.salespeople.map(n => `<div class="team-row"><div class="team-name">${escapeHtml(n)}</div></div>`).join('');
+    return;
+  }
   const { data, error } = await sbClient.from('profiles')
     .select('id, name, email, department, title, active').order('name');
   if (error) {
@@ -3811,6 +4264,7 @@ async function renderTeamList() {
 }
 
 async function updateProfileField(id, field, value) {
+  if (LOCAL_PROTOTYPE || !sbClient) { showToast('Sample preview — not saved'); return; }
   const { error } = await sbClient.from('profiles').update({ [field]: value }).eq('id', id);
   if (error) { showToast('Update failed'); console.error(error); return; }
   showToast('Updated ✓');
@@ -3818,6 +4272,7 @@ async function updateProfileField(id, field, value) {
 
 async function toggleProfileActive(id, isInactive) {
   if (id === state.authUserId) { alert("You can't deactivate your own account."); return; }
+  if (LOCAL_PROTOTYPE || !sbClient) { showToast('Sample preview — not saved'); return; }
   // isInactive true → reactivate (set active true); false → deactivate (set active false)
   const { error } = await sbClient.from('profiles').update({ active: isInactive }).eq('id', id);
   if (error) { showToast('Update failed'); console.error(error); return; }
@@ -4014,7 +4469,7 @@ function escapeHtml(s) {
 }
 function formatNum(n) {
   if (!n) return '0';
-  return Math.round(n).toLocaleString();
+  return Math.round(n).toLocaleString('en-US');
 }
 function formatDate(d) {
   if (!d) return '';
@@ -4036,6 +4491,12 @@ async function startApp() {
 
 (async function init() {
   startUpdateWatcher();
+  if (LOCAL_PROTOTYPE) {
+    const sub = document.getElementById('auth-subtitle');
+    if (sub) sub.textContent = 'Sample data only. Any email and password.';
+    document.getElementById('loginOverlay').style.display = 'flex';
+    return;
+  }
   if (!SUPABASE_CONFIGURED) {
     const errEl = document.getElementById('login-error');
     if (errEl) {
