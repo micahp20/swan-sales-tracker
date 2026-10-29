@@ -292,7 +292,7 @@
     gap: 10px;
     margin-bottom: 16px;
   }
-  @media(min-width: 760px) {
+  @media(min-width: 980px) {
     .stat-grid { grid-template-columns: repeat(4, 1fr); }
   }
   .stat {
@@ -301,25 +301,30 @@
     padding: 14px;
     border: 1px solid var(--gray-200);
     box-shadow: var(--shadow-sm);
+    min-width: 0;
   }
   .stat-label {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--gray-500);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
     margin-bottom: 6px;
+    line-height: 1.3;
   }
   .stat-value {
     font-size: 22px;
     font-weight: 700;
     color: var(--gray-900);
     letter-spacing: -0.5px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
   }
   .stat-sub {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--gray-500);
-    margin-top: 2px;
+    margin-top: 4px;
+    line-height: 1.35;
   }
   .stat-accent { color: var(--royal); }
   .stat-green { color: var(--green); }
@@ -607,19 +612,59 @@
   }
   .pp-nav {
     flex: 0 0 auto;
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
     border-radius: 10px;
     border: 1.5px solid var(--gray-200);
     background: white;
     color: var(--royal);
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 800;
     line-height: 1;
     cursor: pointer;
     font-family: inherit;
   }
   .pp-nav:hover { background: var(--royal-pale); border-color: var(--royal); }
+  /* Dashboard filters: full-width on a phone, one row from tablet up. */
+  .dash-controls { margin-bottom: 4px; }
+  .dash-period { display: flex; flex-direction: column; gap: 8px; }
+  .dash-period-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .dash-controls .month-picker {
+    min-height: 44px;
+    height: 44px;
+    max-width: none;
+    font-size: 16px;
+    padding: 0 36px 0 12px;
+  }
+  .dash-controls .month-picker:focus,
+  .dash-controls .pp-nav:focus-visible,
+  .dash-export-btn:focus-visible {
+    outline: 2px solid var(--royal);
+    outline-offset: 2px;
+  }
+  #deptFilterRow.dash-dept { margin: 8px 0 0; overflow: visible; }
+  #deptFilterRow.dash-dept .month-picker { width: 100%; }
+  .dash-export { display: flex; justify-content: stretch; margin: 8px 0 10px; }
+  .dash-export-btn { min-height: 44px; width: 100%; font-size: 15px; padding: 10px 16px; }
+  @media (min-width: 768px) {
+    .dash-period { flex-direction: row; align-items: center; }
+    #filterMode { flex: 0 0 auto; width: auto; min-width: 132px; }
+    .dash-period-nav { flex: 1; }
+    .dash-export { justify-content: flex-end; }
+    .dash-export-btn { width: auto; }
+  }
+  @media (max-width: 767px) {
+    .dash-period-nav { flex-wrap: wrap; }
+    .dash-period-nav #periodPicker { order: 1; flex: 1 1 100%; min-width: 0; }
+    .dash-period-nav #ppPrev,
+    .dash-period-nav #ppNext { order: 2; flex: 1 1 0; width: auto; }
+  }
   .badge-moved { background: #FEF3C7; color: #92400E; }
   .badge-approval-pending  { background: var(--amber-pale); color: var(--amber); }
   .badge-approval-approved { background: var(--green-pale); color: var(--green); }
@@ -671,23 +716,37 @@
   /* ROW LIST (Pipeline) */
   .leader-row {
     display: flex;
-    align-items: center;
-    padding: 10px 0;
+    align-items: flex-start;
+    padding: 12px 0;
     border-bottom: 1px solid var(--gray-200);
-    gap: 12px;
+    gap: 10px;
+    min-width: 0;
   }
   .leader-row:last-child { border-bottom: none; }
+  .leader-main { flex: 1; min-width: 0; }
+  .leader-topline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+  }
   .leader-stats {
     text-align: right;
+    flex-shrink: 0;
   }
   .leader-total {
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--gray-900);
+    white-space: nowrap;
   }
   .leader-count {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--gray-500);
+    line-height: 1.35;
+    margin-top: 2px;
+    overflow-wrap: anywhere;
   }
   .leader-rank {
     width: 22px;
@@ -703,12 +762,17 @@
     flex-shrink: 0;
   }
   .leader-name {
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 700;
     color: var(--gray-900);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .chart-svg {
     width: 100%;
+    max-width: 100%;
     height: auto;
     display: block;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -716,18 +780,34 @@
   .chart-bar { fill: var(--royal); }
   .chart-bar:hover { fill: var(--royal-light); }
   .chart-grid { stroke: var(--gray-200); stroke-width: 1; }
-  .chart-axis { fill: var(--gray-500); font-size: 11px; }
+  .chart-axis { fill: var(--gray-500); }
   .chart-empty {
-    font-size: 13px;
+    font-size: 15px;
     color: var(--gray-500);
-    padding: 16px 0 8px;
+    padding: 18px 0 8px;
     text-align: center;
   }
   .section-hint {
-    font-size: 12px;
+    font-size: 14px;
     color: var(--gray-500);
     margin: -2px 0 6px;
+    line-height: 1.35;
   }
+  .chart-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 6px 12px;
+    flex-wrap: wrap;
+  }
+  .chart-caption {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--gray-700);
+  }
+  #salesChart, #leaderboard, #deptBreakdown, #pipeline { min-width: 0; }
 
   /* SETTINGS */
   .tier-card {
@@ -1191,22 +1271,26 @@
 
   <!-- DASHBOARD -->
   <div class="screen active" id="screen-dashboard">
-    <div class="filter-row" style="align-items:center; gap:8px; margin-bottom:6px;">
-      <select id="filterMode" class="month-picker" onchange="setFilterMode(this.value)" style="flex:0 0 auto; width:auto;">
-        <option value="cycle">Pay Cycle</option>
-        <option value="month">Month</option>
-        <option value="year">Year</option>
-        <option value="ytd">Year to Date</option>
-      </select>
-      <button class="pp-nav" id="ppPrev" onclick="shiftDashPeriod(-1)" title="Previous pay period" aria-label="Previous pay period">‹</button>
-      <select id="periodPicker" class="month-picker" onchange="setDashPeriod(this.value)" style="flex:1; min-width:0;"></select>
-      <button class="pp-nav" id="ppNext" onclick="shiftDashPeriod(1)" title="Next pay period" aria-label="Next pay period">›</button>
-    </div>
-    <div class="filter-row" id="deptFilterRow" style="align-items:center; gap:8px; margin-bottom:6px; display:none;">
-      <select id="deptFilter" class="month-picker" onchange="setDeptFilter(this.value)" style="flex:1; min-width:0;"></select>
-    </div>
-    <div style="margin:6px 0 2px; text-align:right;">
-      <button class="btn btn-secondary btn-sm" onclick="exportPeriodCsv()">⬇ Export (CSV)</button>
+    <div class="dash-controls">
+      <div class="dash-period">
+        <select id="filterMode" class="month-picker" onchange="setFilterMode(this.value)" aria-label="Period type">
+          <option value="cycle">Pay Cycle</option>
+          <option value="month">Month</option>
+          <option value="year">Year</option>
+          <option value="ytd">Year to Date</option>
+        </select>
+        <div class="dash-period-nav">
+          <button class="pp-nav" id="ppPrev" onclick="shiftDashPeriod(-1)" title="Previous pay period" aria-label="Previous pay period">‹</button>
+          <select id="periodPicker" class="month-picker" onchange="setDashPeriod(this.value)" aria-label="Selected period"></select>
+          <button class="pp-nav" id="ppNext" onclick="shiftDashPeriod(1)" title="Next pay period" aria-label="Next pay period">›</button>
+        </div>
+      </div>
+      <div class="dash-dept" id="deptFilterRow" style="display:none;">
+        <select id="deptFilter" class="month-picker" onchange="setDeptFilter(this.value)" aria-label="Department"></select>
+      </div>
+      <div class="dash-export">
+        <button class="btn btn-secondary dash-export-btn" onclick="exportPeriodCsv()">⬇ Export (CSV)</button>
+      </div>
     </div>
 
     <div class="stat-grid">
@@ -1233,9 +1317,9 @@
     </div>
 
     <div class="card">
-      <div class="card-title" style="display:flex; justify-content:space-between; align-items:baseline; gap:8px;">
+      <div class="card-title chart-head">
         <span>Sales Over Time</span>
-        <span id="chartCaption" style="text-transform:none; letter-spacing:0; font-weight:700; color:var(--gray-700);"></span>
+        <span id="chartCaption" class="chart-caption"></span>
       </div>
       <div id="salesChart"></div>
     </div>
@@ -1720,27 +1804,48 @@ const SYNC_INTERVAL_MS = 8000; // Auto-refresh every 8 seconds
 
 // ============== STORAGE (Supabase) ==============
 
+// First YYYY-MM-DD in a date or timestamp. Blank when the value isn't a date.
+function jobDay(v) {
+  if (v == null || v === '') return '';
+  const m = String(v).trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return '';
+  const month = +m[2], day = +m[3];
+  if (month < 1 || month > 12 || day < 1 || day > 31) return '';
+  return m[1] + '-' + m[2] + '-' + m[3];
+}
+function jobMoney(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (v == null || v === '') return 0;
+  const n = Number(String(v).replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+function jobText(v, fallback) {
+  const s = v == null ? '' : String(v).trim();
+  return s || fallback || '';
+}
+
 // DB row (snake_case) -> in-app job object (camelCase)
 function rowToJob(r) {
+  r = r || {};
   return {
     id: r.id,
     owner_id: r.owner_id,
     customer: r.customer || '',
     jobNumber: r.job_number || '',
-    date: r.date,
-    dateInstalled: r.date_installed ? String(r.date_installed).slice(0, 10) : '',
-    salesperson: r.salesperson || '',
+    date: jobDay(r.date),
+    dateInstalled: jobDay(r.date_installed),
+    salesperson: jobText(r.salesperson, ''),
     equipment: r.equipment || '',
     brand: r.brand || '',
     items: r.items || [],
     status: r.status || 'Sold',
-    price: Number(r.price) || 0,
-    commission: Number(r.commission) || 0,
-    commissionRate: Number(r.commission_rate) || 0,
+    price: jobMoney(r.price),
+    commission: jobMoney(r.commission),
+    commissionRate: jobMoney(r.commission_rate),
     paymentMethods: r.payment_methods || [],
     fees: r.fees || {},
-    department: r.department || '',
-    payPeriodStart: r.pay_period_start ? String(r.pay_period_start).slice(0, 10) : '',
+    department: jobText(r.department, ''),
+    payPeriodStart: jobDay(r.pay_period_start),
     managerNotes: r.manager_notes || '',
     salesNotes: r.sales_notes || '',
     flip: !!r.flip,
@@ -3665,12 +3770,12 @@ function curMonthStr() { return ppTodayStr().slice(0, 7); }
 // Distinct YYYY-MM present in the (role-scoped) sale dates, newest first, plus the current month
 function distinctMonths() {
   const set = new Set([curMonthStr()]);
-  scopeJobsToUser(state.jobs).forEach(j => { if (j.date) set.add(String(j.date).slice(0, 7)); });
+  scopeJobsToUser(state.jobs).forEach(j => { const d = jobDay(j && j.date); if (d) set.add(d.slice(0, 7)); });
   return Array.from(set).sort().reverse();
 }
 function distinctYears() {
   const set = new Set([curYearStr()]);
-  scopeJobsToUser(state.jobs).forEach(j => { if (j.date) set.add(String(j.date).slice(0, 4)); });
+  scopeJobsToUser(state.jobs).forEach(j => { const d = jobDay(j && j.date); if (d) set.add(d.slice(0, 4)); });
   return Array.from(set).sort().reverse();
 }
 
@@ -3680,17 +3785,20 @@ function filterByPeriod(jobs) {
   if (mode === 'ytd') {
     const start = curYearStr() + '-01-01';
     const today = ppTodayStr();
-    return jobs.filter(j => j.date && j.date >= start && j.date <= today);
+    return jobs.filter(j => {
+      const d = jobDay(j && j.date);
+      return d && d >= start && d <= today;
+    });
   }
   if (mode === 'month') {
     const m = state.filterMonth || curMonthStr();
     if (m === 'all') return jobs;
-    return jobs.filter(j => String(j.date || '').slice(0, 7) === m);
+    return jobs.filter(j => jobDay(j && j.date).slice(0, 7) === m);
   }
   if (mode === 'year') {
     const y = String(state.filterYear || curYearStr());
     if (y === 'all') return jobs;
-    return jobs.filter(j => String(j.date || '').slice(0, 4) === y);
+    return jobs.filter(j => jobDay(j && j.date).slice(0, 4) === y);
   }
   // Pay cycle (default)
   const sel = selectedPeriod();
@@ -3915,9 +4023,9 @@ function populateDeptFilter() {
 // Rejected is in neither bucket.
 function commissionSplit(jobs) {
   let approved = 0, pending = 0;
-  jobs.forEach(j => {
-    const c = j.commission || 0;
-    const a = approvalOf(j);
+  (jobs || []).forEach(j => {
+    const c = jobMoney(j && j.commission);
+    const a = approvalOf(j || {});
     if (a === 'approved') approved += c;
     else if (a === 'pending') pending += c;
   });
@@ -3925,15 +4033,15 @@ function commissionSplit(jobs) {
 }
 
 function sumPrices(jobs) {
-  return jobs.reduce((s, j) => s + (j.price || 0), 0);
+  return (jobs || []).reduce((s, j) => s + jobMoney(j && j.price), 0);
 }
 
 function jobCountLabel(n) {
   return n + ' job' + (n === 1 ? '' : 's');
 }
 
-// Right-hand line for leaderboard and department rows.
-function metricSub(jobs) {
+// Job count plus commission, split so a phone can wrap them inside the card.
+function metricLines(jobs) {
   const split = commissionSplit(jobs);
   let comm = '$' + formatNum(split.total) + ' commission';
   if (split.pending && split.approved) {
@@ -3941,12 +4049,12 @@ function metricSub(jobs) {
   } else if (split.pending) {
     comm += ' · <span class="stat-amber">awaiting approval</span>';
   }
-  return jobCountLabel(jobs.length) + ' · ' + comm;
+  return { jobsLine: jobCountLabel((jobs || []).length), comm: comm };
 }
 
 function groupJobs(jobs, keyFn) {
   const map = new Map();
-  jobs.forEach(j => {
+  (jobs || []).forEach(j => {
     const key = keyFn(j) || 'Unassigned';
     if (!map.has(key)) map.set(key, []);
     map.get(key).push(j);
@@ -3956,11 +4064,11 @@ function groupJobs(jobs, keyFn) {
 
 function deptsOf(jobs) {
   const seen = [];
-  jobs.forEach(j => {
-    const d = j.department || 'Unassigned';
+  (jobs || []).forEach(j => {
+    const d = jobText(j && j.department, 'Unassigned');
     if (!seen.includes(d)) seen.push(d);
   });
-  return seen.join(', ');
+  return seen.join(', ') || 'Unassigned';
 }
 
 // One bar per day (pay cycle or month) or per month (year, YTD, all time).
@@ -3980,7 +4088,7 @@ function monthSalesBuckets(jobs, mode, allTime) {
   let keys;
   if (allTime) {
     const set = new Set();
-    jobs.forEach(j => { if (j.date) set.add(String(j.date).slice(0, 7)); });
+    (jobs || []).forEach(j => { const d = jobDay(j && j.date); if (d) set.add(d.slice(0, 7)); });
     keys = Array.from(set).sort();
     if (!keys.length) keys = [curMonthStr()];
   } else if (mode === 'ytd') {
@@ -3994,10 +4102,10 @@ function monthSalesBuckets(jobs, mode, allTime) {
     for (let m = 1; m <= 12; m++) keys.push(y + '-' + String(m).padStart(2, '0'));
   }
   const map = new Map();
-  jobs.forEach(j => {
-    const k = String(j.date || '').slice(0, 7);
-    if (!k || k.length < 7) return;
-    map.set(k, (map.get(k) || 0) + (j.price || 0));
+  (jobs || []).forEach(j => {
+    const k = jobDay(j && j.date).slice(0, 7);
+    if (!k) return;
+    map.set(k, (map.get(k) || 0) + jobMoney(j.price));
   });
   return keys.map(k => ({
     label: PP_MONTHS[(parseInt(k.slice(5), 10) || 1) - 1] || k,
@@ -4006,16 +4114,17 @@ function monthSalesBuckets(jobs, mode, allTime) {
 }
 
 function daySalesBuckets(jobs, ym) {
+  if (!/^\d{4}-\d{2}$/.test(String(ym || ''))) return [];
   const parts = String(ym).split('-');
   const y = parseInt(parts[0], 10);
   const m = parseInt(parts[1], 10);
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate() || 30;
   const map = new Map();
-  jobs.forEach(j => {
-    const d = String(j.date || '');
+  (jobs || []).forEach(j => {
+    const d = jobDay(j && j.date);
     if (d.slice(0, 7) !== ym) return;
     const dd = d.slice(8, 10);
-    map.set(dd, (map.get(dd) || 0) + (j.price || 0));
+    map.set(dd, (map.get(dd) || 0) + jobMoney(j.price));
   });
   const out = [];
   for (let day = 1; day <= days; day++) {
@@ -4026,13 +4135,14 @@ function daySalesBuckets(jobs, ym) {
 }
 
 function cycleSalesBuckets(jobs, start) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(start || ''))) return [];
   const end = ppEndForStart(start);
   const map = new Map();
   for (let i = 0; i < PP_LEN; i++) map.set(ppFromUTC(ppDateToUTC(start) + i * PP_DAY), 0);
-  jobs.forEach(j => {
-    const d = String(j.date || '').slice(0, 10);
+  (jobs || []).forEach(j => {
+    const d = jobDay(j && j.date);
     const key = (d && d >= start && d <= end) ? d : start;
-    map.set(key, (map.get(key) || 0) + (j.price || 0));
+    map.set(key, (map.get(key) || 0) + jobMoney(j && j.price));
   });
   return Array.from(map.entries()).map(([k, value]) => ({
     label: String(parseInt(k.slice(8), 10)),
@@ -4041,7 +4151,7 @@ function cycleSalesBuckets(jobs, start) {
 }
 
 function niceMax(max) {
-  if (max <= 0) return 1;
+  if (!Number.isFinite(max) || max <= 0) return 1;
   const rough = max * 1.08;
   const pow = Math.pow(10, Math.floor(Math.log10(rough)));
   const candidates = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
@@ -4052,30 +4162,39 @@ function niceMax(max) {
   return 10 * pow;
 }
 
-function formatAxis(n) {
+function formatAxis(n, compact) {
+  if (!Number.isFinite(n) || n < 0) n = 0;
   if (n >= 1000) {
     const k = n / 1000;
+    if (compact) return '$' + Math.round(k) + 'k';
     const whole = Math.abs(k - Math.round(k)) < 0.05;
     return '$' + (whole ? String(Math.round(k)) : String(Math.round(k * 10) / 10)) + 'k';
   }
   return '$' + Math.round(n);
 }
 
-function salesChartSvg(buckets) {
-  const w = 640, h = 156;
-  const padL = 48, padR = 8, padT = 14, padB = 24;
+function salesChartSvg(buckets, cssWidth) {
+  // ViewBox matches the card width so axis labels stay about 12px on screen.
+  const w = Math.max(280, Math.round(cssWidth || 640));
+  const narrow = w < 520;
+  const h = narrow ? 188 : 160;
+  const padL = narrow ? 46 : 56;
+  const padR = 8, padT = 14, padB = narrow ? 30 : 26;
   const innerW = w - padL - padR;
   const innerH = h - padT - padB;
-  const max = Math.max.apply(null, buckets.map(b => b.value).concat(0));
+  const values = (buckets || []).map(b => jobMoney(b && b.value));
+  const max = values.length ? Math.max.apply(null, values.concat(0)) : 0;
   const yMax = niceMax(max);
-  const n = buckets.length || 1;
-  const gap = n > 20 ? 2 : 4;
-  const barW = Math.max(1, (innerW - gap * (n - 1)) / n);
-  const step = n > 20 ? 5 : 1;
+  const n = (buckets || []).length || 1;
+  const gap = n > 20 ? 3 : 6;
+  const barW = Math.max(2, (innerW - gap * (n - 1)) / n);
+  const labelSlots = narrow ? 5 : 8;
+  const step = n > labelSlots ? Math.ceil(n / labelSlots) : 1;
+  const font = 12;
   const ticks = [yMax, yMax / 2, 0].map(v => {
     const y = padT + innerH - (v / yMax) * innerH;
     return `<line class="chart-grid" x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}"/>` +
-      `<text class="chart-axis" x="${padL - 6}" y="${y}" text-anchor="end" dominant-baseline="middle">${formatAxis(max > 0 ? v : 0)}</text>`;
+      `<text class="chart-axis" x="${padL - 6}" y="${y}" text-anchor="end" dominant-baseline="middle" font-size="${font}">${formatAxis(max > 0 ? v : 0, narrow)}</text>`;
   }).join('');
   const bars = buckets.map((b, i) => {
     const bh = max > 0 ? (b.value / yMax) * innerH : 0;
@@ -4084,7 +4203,7 @@ function salesChartSvg(buckets) {
     const hBar = b.value > 0 ? Math.max(bh, 2) : 0;
     const showLabel = (i % step === 0) || i === n - 1;
     const label = showLabel
-      ? `<text class="chart-axis" x="${x + barW / 2}" y="${h - 6}" text-anchor="middle">${b.label}</text>`
+      ? `<text class="chart-axis" x="${x + barW / 2}" y="${h - 8}" text-anchor="middle" font-size="${font}">${escapeHtml(b.label)}</text>`
       : '';
     const title = b.label + ': $' + formatNum(b.value);
     return `<rect class="chart-bar" x="${x}" y="${y}" width="${barW}" height="${hBar}" rx="2"><title>${escapeHtml(title)}</title></rect>${label}`;
@@ -4092,17 +4211,33 @@ function salesChartSvg(buckets) {
   return `<svg class="chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="Sales over time for ${escapeHtml(activeFilterLabel())}">${ticks}${bars}</svg>`;
 }
 
-function renderSalesChart(jobs) {
+function renderSalesChart(jobs, retry) {
   const cap = document.getElementById('chartCaption');
   if (cap) cap.textContent = activeFilterLabel();
   const el = document.getElementById('salesChart');
   if (!el) return;
-  const buckets = salesBuckets(jobs);
-  const total = buckets.reduce((s, b) => s + b.value, 0);
-  el.innerHTML = (!jobs.length || total <= 0)
-    ? '<div class="chart-empty">No sales in this period.</div>'
-    : salesChartSvg(buckets);
+  const list = jobs || [];
+  const buckets = salesBuckets(list);
+  const total = buckets.reduce((s, b) => s + jobMoney(b && b.value), 0);
+  if (!list.length || total <= 0 || !buckets.length) {
+    el.innerHTML = '<div class="chart-empty">No sales in this period.</div>';
+    return;
+  }
+  const width = el.clientWidth || 0;
+  if (width < 40 && !retry) {
+    requestAnimationFrame(() => renderSalesChart(list, true));
+    return;
+  }
+  el.innerHTML = salesChartSvg(buckets, width || 320);
 }
+
+let dashResizeTimer = null;
+window.addEventListener('resize', () => {
+  const screen = document.getElementById('screen-dashboard');
+  if (!screen || !screen.classList.contains('active') || !state.authUserId) return;
+  clearTimeout(dashResizeTimer);
+  dashResizeTimer = setTimeout(() => { renderDashboard(); }, 160);
+});
 
 function renderLeaderboard(jobs) {
   const el = document.getElementById('leaderboard');
@@ -4111,22 +4246,24 @@ function renderLeaderboard(jobs) {
     el.innerHTML = '<div class="chart-empty">No sales in this period.</div>';
     return;
   }
-  const rows = Array.from(groupJobs(jobs, j => j.salesperson || 'Unassigned').entries())
+  const rows = Array.from(groupJobs(jobs, j => jobText(j && j.salesperson, 'Unassigned')).entries())
     .map(([name, list]) => ({ name, list, sales: sumPrices(list) }))
-    .sort((a, b) => b.sales - a.sales || a.name.localeCompare(b.name));
-  el.innerHTML = rows.map((row, i) => `
+    .sort((a, b) => b.sales - a.sales || String(a.name).localeCompare(String(b.name)));
+  el.innerHTML = rows.map((row, i) => {
+    const lines = metricLines(row.list);
+    return `
     <div class="leader-row">
       <div class="leader-rank">${i + 1}</div>
-      <div style="flex:1; min-width:0;">
-        <div class="leader-name">${escapeHtml(row.name)}</div>
-        <div class="leader-count">${escapeHtml(deptsOf(row.list))}</div>
+      <div class="leader-main">
+        <div class="leader-topline">
+          <div class="leader-name">${escapeHtml(row.name)}</div>
+          <div class="leader-total">$${formatNum(row.sales)}</div>
+        </div>
+        <div class="leader-count">${escapeHtml(deptsOf(row.list))} · ${lines.jobsLine}</div>
+        <div class="leader-count">${lines.comm}</div>
       </div>
-      <div class="leader-stats" style="max-width:62%;">
-        <div class="leader-total">$${formatNum(row.sales)}</div>
-        <div class="leader-count">${metricSub(row.list)}</div>
-      </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderDeptBreakdown(jobs) {
@@ -4136,20 +4273,22 @@ function renderDeptBreakdown(jobs) {
     el.innerHTML = '<div class="chart-empty">No sales in this period.</div>';
     return;
   }
-  const rows = Array.from(groupJobs(jobs, j => j.department || 'Unassigned').entries())
+  const rows = Array.from(groupJobs(jobs, j => jobText(j && j.department, 'Unassigned')).entries())
     .map(([name, list]) => ({ name, list, sales: sumPrices(list) }))
-    .sort((a, b) => b.sales - a.sales || a.name.localeCompare(b.name));
-  el.innerHTML = rows.map(row => `
+    .sort((a, b) => b.sales - a.sales || String(a.name).localeCompare(String(b.name)));
+  el.innerHTML = rows.map(row => {
+    const lines = metricLines(row.list);
+    return `
     <div class="leader-row">
-      <div style="flex:1; min-width:0;">
-        <span class="badge badge-dept">${escapeHtml(row.name)}</span>
+      <div class="leader-main">
+        <div class="leader-topline">
+          <span class="badge badge-dept">${escapeHtml(row.name)}</span>
+          <div class="leader-total">$${formatNum(row.sales)}</div>
+        </div>
+        <div class="leader-count">${lines.jobsLine} · ${lines.comm}</div>
       </div>
-      <div class="leader-stats" style="max-width:68%;">
-        <div class="leader-total">$${formatNum(row.sales)}</div>
-        <div class="leader-count">${metricSub(row.list)}</div>
-      </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function renderDashboard() {
@@ -4198,7 +4337,7 @@ function renderDashboard() {
   const pipeEl = document.getElementById('pipeline');
   pipeEl.innerHTML = statuses.map(s => {
     const items = filtered.filter(j => j.status === s);
-    const sTotal = items.reduce((sum, j) => sum + (j.price || 0), 0);
+    const sTotal = items.reduce((sum, j) => sum + jobMoney(j && j.price), 0);
     return `
       <div class="leader-row">
         <div style="flex:1;">
